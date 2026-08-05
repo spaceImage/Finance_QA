@@ -19,6 +19,7 @@ from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langgraph.graph import StateGraph, START, END
 
 from rag_common import get_embeddings, get_vectorstore, load_policy_md as _load_policy_md, get_enrolled_sections
+from prompts import ROUTER_SYSTEM_PROMPT, MULTIHOP_CHECK_PROMPT, GENERATE_BLOCK_SYSTEM_PROMPT
 
 # .env 파일 로드
 load_dotenv()
@@ -32,6 +33,12 @@ class AgentState(TypedDict):
     documents: List[Document]
     generation: str
     loop_count: int
+    is_valid: Optional[bool]
+    missing_info: Optional[str]
+    blocks: Optional[List[Dict[str, Any]]]
+    missing_slots: Optional[List[str]]
+    slot_values: Optional[Dict[str, Any]]
+    slot_prompt: Optional[str]
 
 
 class InsuranceRAGEngine:
@@ -71,7 +78,7 @@ class InsuranceRAGEngine:
     async def route_question(self, state: AgentState) -> Dict[str, Any]:
         """
         [Router Node]
-        사용자의 질문과 개인 증권 정보를 기반으로, 약관 조회에 필요한 관련 특약들을 분류합니다.
+        사용자의 질문과 개인 증권 정보를 기반으로, 약관 조회에 필요한 관련 특약들을 분류하고 1단계 파라미터를 검증합니다.
         """
         print("🔮 [Router Node] 질문 분류 및 연관 특약 분석 중...")
         question = state["question"]
@@ -79,33 +86,14 @@ class InsuranceRAGEngine:
         policy_md = self.load_policy_md()
         
         llm = ChatOpenAI(
-            model="gpt-4o-mini", 
+            model="gpt-5-mini", 
             temperature=0, 
             openai_api_key=self.openai_api_key,
             model_kwargs={"response_format": {"type": "json_object"}}
         )
         
         prompt = ChatPromptTemplate.from_messages([
-            ("system", """당신은 보험 약관 라우터입니다. 
-제공된 [개인 보험증권 정보]와 [사용자 질문]을 비교하여, 질문에 답변하기 위해 반드시 조회해야 하는 관련 약관/특약들의 이름을 후보 목록에서 선택하여 JSON 배열로 반환하세요.
-
-💡 매칭 규칙:
-- "식중독, 재해, 깁스, 응급" 등 재해/응급 치료 관련 질문은 '기초응급자금특약', '재해치료비보장특약', '입원특약' 등 관련 특약들을 모두 선택해야 합니다.
-- "갑상선암, 제자리암, 경계성종양, 소액암, 양성뇌종양" 등의 진단비(진단보험금)는 반드시 '리빙케어보장특약'을 선택해야 합니다.
-- "암, 소액암" 등의 입원/통원 치료비(치료급여금)를 묻는 질문은 '암치료비특약' 또는 '특정질병입원특약'을 선택해야 합니다.
-- "수술" 관련 질문은 '특정질병수술보장특약'이나 관련 수술 특약을 선택해야 합니다.
-- 일반적인 중대질병(CI) 진단이나 사망에 관한 질문은 주계약이나 'CI두번보장특약', '뉴CI보장특약' 등을 선택해야 합니다.
-
-[개인 보험증권 정보]
-{policy_md}
-
-후보 목록:
-{sections_list}
-
-응답은 반드시 아래 JSON 형식을 지켜주세요:
-{{
-  "selected_sections": ["특약명1", "특약명2"]
-}}"""),
+            ("system", ROUTER_SYSTEM_PROMPT),
             ("human", "질문: {question}")
         ])
         
@@ -116,8 +104,12 @@ class InsuranceRAGEngine:
                 "sections_list": json.dumps(all_sections, ensure_ascii=False),
                 "question": question
             })
+            
+            is_valid = response.get("is_valid", True)
+            missing_info = response.get("missing_info", "")
             selected = response.get("selected_sections", [])
-            print(f"🎯 라우터 분류 결과: {selected}")
+            print(f"🎯 라우터 파라미터 검증: is_valid={is_valid}, missing_info='{missing_info}'")
+            print(f"🎯 라우터 선택 특약: {selected}")
             
             matched_filters = []
             for sel in selected:
@@ -135,10 +127,15 @@ class InsuranceRAGEngine:
                             
             matched_filters = list(set(matched_filters))
             print(f"🎯 보정된 특약 필터 목록: {matched_filters}")
-            return {"section_filters": matched_filters, "loop_count": 0}
+            return {
+                "section_filters": matched_filters,
+                "is_valid": is_valid,
+                "missing_info": missing_info,
+                "loop_count": 0
+            }
         except Exception as e:
             print(f"⚠️ 라우터 오류 발생: {e}. 필터 없이 진행합니다.")
-            return {"section_filters": [], "loop_count": 0}
+            return {"section_filters": [], "is_valid": True, "missing_info": "", "loop_count": 0}
 
     async def retrieve(self, state: AgentState) -> Dict[str, Any]:
         """
@@ -178,7 +175,32 @@ class InsuranceRAGEngine:
                         doc_set[d.page_content] = d
 
             print(f"📦 검색된 총 문서 수: {len(docs)}개")
+
+            # 3단계: Multi-hop 2차 연쇄 참조 (별표 X 참조, 제O조 참조) 감지 및 보충 검색
+            import re
+            chain_refs = []
+            for doc in docs:
+                matches = re.findall(r'(별표\s*\d+|제\s*\d+\s*조|별첨\s*\d*)', doc.page_content)
+                for m in matches:
+                    clean_m = m.strip()
+                    if clean_m not in chain_refs and len(clean_m) <= 15:
+                        chain_refs.append(clean_m)
+            
+            if chain_refs:
+                print(f"🔗 [Multi-hop Node] 2차 연쇄 참조 조항 감지: {chain_refs}")
+                for ref_kw in chain_refs[:2]:
+                    sub_candidates = await asyncio.to_thread(
+                        vectorstore.similarity_search, f"{question} {ref_kw}", k=2, filter=task_filter
+                    )
+                    doc_set = {d.page_content: d for d in docs}
+                    for sub_d in sub_candidates:
+                        if sub_d.page_content not in doc_set:
+                            docs.append(sub_d)
+                            doc_set[sub_d.page_content] = sub_d
+                print(f"📦 Multi-hop 보충 후 총 문서 수: {len(docs)}개")
+
             return {"documents": docs}
+
         except Exception as e:
             print(f"⚠️ 문서 검색 중 오류 발생: {e}. 필터 없이 재시도합니다.")
             try:
@@ -203,7 +225,7 @@ class InsuranceRAGEngine:
             return {"documents": []}
             
         llm = ChatOpenAI(
-            model="gpt-4o-mini", 
+            model="gpt-5-mini", 
             temperature=0, 
             openai_api_key=self.openai_api_key,
             model_kwargs={"response_format": {"type": "json_object"}}
@@ -253,7 +275,7 @@ class InsuranceRAGEngine:
         question = state["question"]
         loop_count = state["loop_count"]
         
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=self.openai_api_key)
+        llm = ChatOpenAI(model="gpt-5-mini", temperature=0, openai_api_key=self.openai_api_key)
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", """당신은 RAG 검색 확률을 높이기 위해 사용자의 질문을 검색에 최적화된 형태로 재작성하는 전문가입니다.
@@ -273,14 +295,19 @@ class InsuranceRAGEngine:
     async def generate(self, state: AgentState) -> Dict[str, Any]:
         """
         [Generate Node]
-        개인 증권 정보와 필터링된 약관 문서를 결합하여 구체적인 보험금 액수를 직접 계산하여 답변합니다.
+        개인 증권 정보와 필터링된 약관 문서를 결합하여 구조화된 UI Block JSON 및 답변을 생성합니다.
         """
-        print("✍️ [Generate Node] 최종 답변 작성 중...")
+        print("✍️ [Generate Node] 구조화된 UI Block 및 답변 작성 중...")
         question = state["question"]
         documents = state["documents"]
         policy_md = self.load_policy_md()
         
-        llm = ChatOpenAI(model="gpt-4o", temperature=0, openai_api_key=self.openai_api_key)
+        llm = ChatOpenAI(
+            model="gpt-5-mini", 
+            temperature=0, 
+            openai_api_key=self.openai_api_key,
+            model_kwargs={"response_format": {"type": "json_object"}}
+        )
         
         context_text_list = []
         for doc in documents:
@@ -289,50 +316,86 @@ class InsuranceRAGEngine:
             )
         context_combined = "\n\n---\n\n".join(context_text_list)
         
-        prompt = f"""당신은 보험 약관 및 개인 보험증권 분석 전문 AI 상담원입니다.
-아래 제공된 [개인 보험증권 정보]와 [약관 참고 문서]를 대조하여 사용자의 질문에 정확하고 친절하게 답변해 주세요.
-
-⚠️ 답변 작성 규칙:
-1. 약관 참고 문서에는 지급 기준이 비율(%)로 나와 있는 경우가 많습니다. 이 경우, [개인 보험증권 정보]에서 해당 특약의 '보험가입금액'을 찾아 실제 지급될 구체적인 보험금 액수(예: 3,000만원의 30% = 900만원)를 직접 계산하여 답변에 명시해 주세요.
-   단, 계산에 쓰는 비율(%)이나 공제금액은 반드시 **지금 답변하려는 그 항목의 조항에 실제로 적힌 숫자**여야 합니다.
-   "실손보험은 보통 급여 90%를 보상한다"처럼 일반적인 보험 상식이나 다른 조항(예: 입원형)에서 본 숫자를
-   가져와 적용하지 마세요 — 해당 조항에 비율이 없으면(예: 공제금액만 빼고 한도까지 보상) 비율 없이 그대로 계산하세요.
-2. 각 청구 및 진단 시점에 약관상 면책 기간(예: 가입 후 90일 면책)이나 지급 한도(예: 1회 입원당 120일 한도) 등의 제약 사항이 걸려 있다면, 질문 상황과 비교하여 지급 가능 여부를 팩트체크하여 알려주세요.
-3. 정보의 출처(특약명 및 약관 페이지 번호, 개인 보험증권 등)를 반드시 답변에 명시해 주세요.
-4. [개인 보험증권 정보]는 이 고객이 가입한 특약의 '전체' 목록입니다(빠짐없이 다 나와 있음). 질문한 보장 항목이
-   이 목록의 어떤 특약과도 관련이 없다면, "확인이 필요합니다"처럼 얼버무리지 말고
-   "가입하신 보장 항목에는 OOO가 포함되어 있지 않아, 이 건으로는 보험금을 받으실 수 없습니다."처럼
-   가입하지 않았다는 사실 자체를 근거로 확정적으로 답변하세요. (단, [약관 참고 문서]에서 관련 조항이 실제로
-   검색되었는데 세부 지급조건만 불분명한 경우에는 그 조항을 근거로 답변하고, 이 규칙을 적용하지 마세요.)
-5. 추상적이거나 '보험사에 문의하세요', '약관을 직접 확인해 보세요' 같이 사용자를 다른 곳으로 떠넘기는
-   원론적인 답변은 절대 금지합니다. 판단은 항상 당신이 직접 내려서 답변하세요.
-6. 약관 원문에 직접 적히지 않은 가상의 임의 예시 숫자(예: '1,000만원 발생 시 900만원 보상된다' 등)는 지어내지 마세요.
-7. 답변은 반드시 한국어로 작성하고, 문장 끝에 마침표를 붙여 완결된 문장으로 작성하세요.
-
-[개인 보험증권 정보]
-{policy_md}
-
-[약관 참고 문서]
-{context_combined}
-
-[사용자 질문]
-{question}
-"""
+        prompt = GENERATE_BLOCK_SYSTEM_PROMPT.format(
+            policy_md=policy_md,
+            context=context_combined
+        ) + f"\n\n[사용자 질문]\n{question}"
         
         try:
+            res = await llm.ainvoke(prompt)
+            parsed = json.loads(res.content)
+            answer = parsed.get("answer", "")
+            blocks = parsed.get("blocks", [])
             print("\n" + "="*50)
-            print("📊 [최종 답변 결과]")
+            print("📊 [최종 구조화 답변 결과]")
+            print(f"Answer: {answer}")
+            print(f"Blocks ({len(blocks)}개): {[b.get('block_type') for b in blocks]}")
             print("="*50)
-            full_text = ""
-            async for chunk in llm.astream(prompt):
-                piece = chunk.content or ""
-                print(piece, end="", flush=True)
-                full_text += piece
-            print("\n" + "="*50)
-            return {"generation": full_text}
+            return {"generation": answer, "blocks": blocks}
         except Exception as e:
-            print(f"⚠️ 답변 생성 오류: {e}")
-            return {"generation": f"오류로 인해 답변을 생성하지 못했습니다: {e}"}
+            print(f"⚠️ 답변 생성 중 오류 발생: {e}")
+            fallback_msg = "약관 대조 중 오류가 발생하여 기본 안내를 출력합니다."
+            return {"generation": fallback_msg, "blocks": []}
+
+
+    async def check_slots(self, state: AgentState) -> Dict[str, Any]:
+        """
+        [Check Slots Node]
+        질문에서 보상 계산 필수 정보(입원일수, 수술방식, 암병기 등)가 빠져 있는지 점검합니다.
+        """
+        print("❓ [Check Slots Node] 필수 슬롯(보상 조건) 유무 검사 중...")
+        question = state["question"]
+        slot_values = state.get("slot_values") or {}
+
+        missing_slots = []
+        slot_prompt = None
+
+        # 1. 입원 관련 필수 슬롯 체크
+        has_days_in_text = any(kw in question for kw in ["일간", "일동안", "며칠", "일간 입원", "5일", "3일", "7일", "hospital_days", "보완 정보"])
+        if any(kw in question for kw in ["입원", "식중독"]) and "hospital_days" not in slot_values and not has_days_in_text:
+            missing_slots.append("hospital_days")
+            slot_prompt = "피보험자님, 정확한 입원 일수를 알려주시면 보상 금액을 정밀 계산해 드릴 수 있습니다. (예: 5일 입원)"
+
+        if missing_slots and slot_prompt:
+            print(f"⚠️ 필수 슬롯 누락 감지: {missing_slots} -> 되묻기 발동!")
+            return {
+                "missing_slots": missing_slots,
+                "slot_prompt": slot_prompt,
+                "generation": slot_prompt
+            }
+
+        print("🟢 필수 슬롯 검사 통과. 약관 검색으로 진행합니다.")
+        return {"missing_slots": [], "slot_prompt": None}
+
+    async def ask_slots(self, state: AgentState) -> Dict[str, Any]:
+        """
+        [Ask Slots Node]
+        사용자에게 부족한 슬롯 정보를 되물어 보완받기 위한 대기 답변 생성
+        """
+        prompt_text = state.get("slot_prompt") or "보장 계산을 위한 추가 정보를 입력해 주세요."
+        print("\n" + "="*50)
+        print("❓ [AI 되묻기 (Slot Filling)]")
+        print("="*50)
+        print(prompt_text)
+        print("="*50)
+        blocks = [
+            {
+                "block_type": "CONTEXT",
+                "title": "상황 파악 및 필수 조건 검사",
+                "content": f"질문: {state.get('question', '')}"
+            },
+            {
+                "block_type": "CAUTION",
+                "title": "추가 정보 보완 필요 (Slot Filling)",
+                "content": prompt_text
+            }
+        ]
+        return {"generation": prompt_text, "blocks": blocks}
+
+    def decide_to_ask_slots(self, state: AgentState) -> Literal["ask_slots", "retrieve"]:
+        if state.get("missing_slots"):
+            return "ask_slots"
+        return "retrieve"
 
     def decide_to_generate(self, state: AgentState) -> Literal["generate", "rewrite_query", "fallback_generate"]:
         filtered_documents = state["documents"]
@@ -356,12 +419,21 @@ class InsuranceRAGEngine:
         print("="*50)
         print(message)
         print("="*50)
-        return {"generation": message}
+        blocks = [
+            {
+                "block_type": "CAUTION",
+                "title": "약관 정보 검색 결과 안내",
+                "content": message
+            }
+        ]
+        return {"generation": message, "blocks": blocks}
 
     def _build_graph(self) -> StateGraph:
         workflow = StateGraph(AgentState)
         
         workflow.add_node("route_question", self.route_question)
+        workflow.add_node("check_slots", self.check_slots)
+        workflow.add_node("ask_slots", self.ask_slots)
         workflow.add_node("retrieve", self.retrieve)
         workflow.add_node("grade_documents", self.grade_documents)
         workflow.add_node("rewrite_query", self.rewrite_query)
@@ -369,7 +441,17 @@ class InsuranceRAGEngine:
         workflow.add_node("fallback_generate", self.fallback_generate)
         
         workflow.add_edge(START, "route_question")
-        workflow.add_edge("route_question", "retrieve")
+        workflow.add_edge("route_question", "check_slots")
+        
+        workflow.add_conditional_edges(
+            "check_slots",
+            self.decide_to_ask_slots,
+            {
+                "ask_slots": "ask_slots",
+                "retrieve": "retrieve"
+            }
+        )
+        
         workflow.add_edge("retrieve", "grade_documents")
         
         workflow.add_conditional_edges(
@@ -383,28 +465,32 @@ class InsuranceRAGEngine:
         )
         
         workflow.add_edge("rewrite_query", "retrieve")
+        workflow.add_edge("ask_slots", END)
         workflow.add_edge("generate", END)
         workflow.add_edge("fallback_generate", END)
         
         return workflow.compile()
 
-    async def ainvoke(self, query: str) -> Dict[str, Any]:
+    async def ainvoke(self, query: str, slot_values: Optional[dict] = None) -> Dict[str, Any]:
         inputs = {
             "question": query,
             "section_filters": [],
             "documents": [],
             "generation": "",
-            "loop_count": 0
+            "loop_count": 0,
+            "missing_slots": [],
+            "slot_values": slot_values or {},
+            "slot_prompt": None
         }
         return await self.app.ainvoke(inputs)
 
-    def invoke(self, query: str) -> Dict[str, Any]:
+    def invoke(self, query: str, slot_values: Optional[dict] = None) -> Dict[str, Any]:
         """
         [Sync Invoke]
         동기적으로 그래프를 실행합니다.
         """
         try:
-            return asyncio.run(self.ainvoke(query))
+            return asyncio.run(self.ainvoke(query, slot_values))
         except RuntimeError:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -467,6 +553,29 @@ class InsuranceRAGEngine:
                             "data": chunk.content
                         }
 
+    def run_json(self, query: str) -> str:
+        """단일 질문에 대해 invoke 후 JSON 문자열을 반환하는 헬퍼 함수."""
+        final_state = self.invoke(query)
+        referenced_pages = [
+            {
+                "section_title": doc.metadata.get("section_title"),
+                "page_number": doc.metadata.get("page"),
+                "source_pdf": doc.metadata.get("source_pdf"),
+                "full_content": doc.page_content,
+            }
+            for doc in final_state.get("documents", [])
+        ]
+        output_data = {
+            "query": query,
+            "status": "NEED_MORE_INFO" if final_state.get("is_valid") is False else "SUCCESS",
+            "answer": final_state.get("generation", ""),
+            "blocks": final_state.get("blocks") or [],
+            "total_referenced_count": len(referenced_pages),
+            "referenced_pages": referenced_pages,
+        }
+        return json.dumps(output_data, ensure_ascii=False, indent=2)
+
+
 
 # ==========================================
 # 6. 하위 호환성용 전역 호출 함수 및 CLI 모드
@@ -486,10 +595,10 @@ def run_agentic_rag(query: str, task_name: str = "jang"):
     print("="*50)
 
 
-def run_agentic_rag_json(query: str, task_name: str = "jang") -> str:
+def run_agentic_rag_json(query: str, task_name: str = "jang", slot_values: Optional[dict] = None) -> str:
     """[API/화면용] 기존 run_agentic_rag_json 함수와의 호환성을 보장합니다."""
     engine = InsuranceRAGEngine(task_name=task_name)
-    final_state = engine.invoke(query)
+    final_state = engine.invoke(query, slot_values=slot_values)
 
     referenced_pages = [
         {
@@ -501,13 +610,26 @@ def run_agentic_rag_json(query: str, task_name: str = "jang") -> str:
         for doc in final_state.get("documents", [])
     ]
 
+    blocks = final_state.get("blocks") or []
+    if not blocks and final_state.get("generation"):
+        blocks = [
+            {
+                "block_type": "RETRIEVAL_RESULT",
+                "title": "약관 검색 결과 및 보장 내역",
+                "items": [final_state.get("generation", "")]
+            }
+        ]
+
     output_data = {
         "query": query,
+        "status": "NEED_MORE_INFO" if final_state.get("is_valid") is False else "SUCCESS",
         "answer": final_state.get("generation", ""),
+        "blocks": blocks,
         "total_referenced_count": len(referenced_pages),
         "referenced_pages": referenced_pages,
     }
     return json.dumps(output_data, ensure_ascii=False, indent=2)
+
 
 
 DEMO_QUERIES = [

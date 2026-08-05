@@ -1,20 +1,59 @@
 import { useState, useCallback, useRef } from "react";
 
+export interface Citation {
+  id: number;
+  section_title: string;
+  page: number;
+  snippet: string;
+}
+
+export interface BlockItem {
+  text: string;
+  citations?: Citation[];
+}
+
+export interface UIBlock {
+  block_type: "CONTEXT" | "RETRIEVAL_RESULT" | "CAUTION" | "DELIVER";
+  title: string;
+  variant?: string;
+  content?: string;
+  items?: (string | BlockItem)[];
+}
+
+export interface StepLog {
+  step: number;
+  label: string;
+  timestamp: string;
+}
+
 interface UseSSEReturn {
   data: string;
+  blocks: UIBlock[];
+  status: string;
   isLoading: boolean;
   isCompleted: boolean;
+  progress: number;
+  currentStepLabel: string;
+  stepLogs: StepLog[];
   error: string | null;
-  startStream: (query: string, taskName?: string) => void;
+  sessionId: string | null;
+  startStream: (query: string, taskName?: string) => Promise<void>;
+  sendSlotFill: (slotKey: string, slotValue: string, taskName?: string) => Promise<void>;
   stopStream: () => void;
   resetStream: () => void;
 }
 
 export function useSSE(): UseSSEReturn {
   const [data, setData] = useState<string>("");
+  const [blocks, setBlocks] = useState<UIBlock[]>([]);
+  const [status, setStatus] = useState<string>("SUCCESS");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
+  const [progress, setProgress] = useState<number>(0);
+  const [currentStepLabel, setCurrentStepLabel] = useState<string>("");
+  const [stepLogs, setStepLogs] = useState<StepLog[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
 
@@ -29,18 +68,51 @@ export function useSSE(): UseSSEReturn {
   const resetStream = useCallback(() => {
     stopStream();
     setData("");
+    setBlocks([]);
+    setStatus("SUCCESS");
+    setProgress(0);
+    setCurrentStepLabel("");
+    setStepLogs([]);
     setError(null);
     setIsCompleted(false);
   }, [stopStream]);
 
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  const createSession = async (taskName: string = "jang"): Promise<string | null> => {
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/session/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_name: taskName }),
+      });
+      const resData = await res.json();
+      if (resData.session_id) {
+        setSessionId(resData.session_id);
+        return resData.session_id;
+      }
+    } catch (e) {
+      console.warn("세션 생성 오류 (기본 진행):", e);
+    }
+    return null;
+  };
+
   const startStream = useCallback(
-    (query: string, taskName: string = "jang") => {
+    async (query: string, taskName: string = "jang") => {
       resetStream();
       setIsLoading(true);
+      setProgress(15);
+      const initLabel = "🔮 1단계: 파이프라인 초기화 및 라우팅 분석 중...";
+      setCurrentStepLabel(initLabel);
+      setStepLogs([{ step: 1, label: initLabel, timestamp: new Date().toLocaleTimeString() }]);
 
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const activeSessionId = await createSession(taskName);
+
       const encodedQuery = encodeURIComponent(query);
-      const url = `${baseUrl}/api/rag/stream?query=${encodedQuery}&task_name=${taskName}`;
+      let url = `${baseUrl}/api/rag/stream?query=${encodedQuery}&task_name=${taskName}`;
+      if (activeSessionId) {
+        url += `&session_id=${activeSessionId}`;
+      }
 
       try {
         const es = new EventSource(url);
@@ -54,25 +126,35 @@ export function useSSE(): UseSSEReturn {
           try {
             if (event.data === "[DONE]") {
               setIsCompleted(true);
+              setProgress(100);
               stopStream();
               return;
             }
 
             const parsed = JSON.parse(event.data);
-            if (parsed.content) {
+            if (parsed.progress !== undefined) {
+              setProgress(parsed.progress);
+              if (parsed.label) {
+                setCurrentStepLabel(parsed.label);
+                setStepLogs((prev) => [
+                  ...prev,
+                  { step: parsed.step || prev.length + 1, label: parsed.label, timestamp: new Date().toLocaleTimeString() }
+                ]);
+              }
+            } else if (parsed.blocks && Array.isArray(parsed.blocks)) {
+              setBlocks(parsed.blocks);
+              if (parsed.status) setStatus(parsed.status);
+              setProgress(100);
+            } else if (parsed.content) {
               setData((prev) => prev + parsed.content);
-            } else if (typeof parsed === "string") {
-              setData((prev) => prev + parsed);
             }
           } catch {
-            // 일반 텍스트 스트림 처리
             setData((prev) => prev + event.data);
           }
         };
 
         es.onerror = (err) => {
           console.error("SSE Connection Error:", err);
-          // 스트림 정상 종료나 연결 에러 시 처리
           setIsCompleted(true);
           stopStream();
         };
@@ -81,16 +163,68 @@ export function useSSE(): UseSSEReturn {
         setIsLoading(false);
       }
     },
-    [resetStream, stopStream]
+    [resetStream, stopStream, baseUrl]
+  );
+
+  const sendSlotFill = useCallback(
+    async (slotKey: string, slotValue: string, taskName: string = "jang") => {
+      if (!sessionId) {
+        // 세션 ID가 없을 경우 신규 생성
+        const newSid = await createSession(taskName);
+        if (!newSid) {
+          setError("세션 정보를 찾을 수 없습니다.");
+          return;
+        }
+      }
+
+      setIsLoading(true);
+      setError(null);
+      setData((prev) => prev + `\n\n💬 [보완 답변 전송]: ${slotValue}\n🔄 보완된 정보로 정밀 계산 중...\n\n`);
+
+      try {
+        const res = await fetch(`${baseUrl}/api/v1/chat/slot-fill`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            slot_key: slotKey,
+            slot_value: slotValue,
+            task_name: taskName,
+          }),
+        });
+
+        const resData = await res.json();
+        if (resData.status === "success" && resData.result) {
+          const finalAnswer = resData.result.answer || "보상 계산이 완료되었습니다.";
+          setData((prev) => prev + finalAnswer);
+        } else {
+          setError("슬롯 보완 답변 처리에 실패했습니다.");
+        }
+      } catch (e: any) {
+        setError(e.message || "Slot-fill API 호출 에러가 발생했습니다.");
+      } finally {
+        setIsLoading(false);
+        setIsCompleted(true);
+      }
+    },
+    [sessionId, baseUrl]
   );
 
   return {
     data,
+    blocks,
+    status,
     isLoading,
     isCompleted,
+    progress,
+    currentStepLabel,
+    stepLogs,
     error,
+    sessionId,
     startStream,
+    sendSlotFill,
     stopStream,
     resetStream,
   };
 }
+
