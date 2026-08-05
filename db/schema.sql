@@ -60,6 +60,31 @@ begin
 end;
 $$;
 
--- 5. (선택) 특정 인물(task_name)의 데이터를 한 번에 지우고 싶을 때 사용할 헬퍼
---    step_3.py가 재실행 시 자동으로 아래와 동일한 delete를 수행하므로 수동 실행은 보통 불필요합니다.
--- delete from documents where metadata->>'task_name' = 'jang';
+-- 5. 세션 관리 테이블 (sessions)
+create table if not exists sessions (
+  id uuid primary key default gen_random_uuid(),
+  task_name text not null,
+  counselor_id text,
+  status text not null default 'ACTIVE',
+  metadata jsonb default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- 6. RAG 오케스트레이션 단계별 감사 로그 테이블 (audit_logs)
+create table if not exists audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid references sessions(id) on delete cascade,
+  step_name text not null,
+  status text not null default 'SUCCESS',
+  input_payload jsonb default '{}'::jsonb,
+  output_payload jsonb default '{}'::jsonb,
+  execution_time_ms integer default 0,
+  created_at timestamptz not null default now()
+);
+
+-- 7. Audit Log & Sessions 인덱스
+create index if not exists sessions_task_name_idx on sessions (task_name);
+create index if not exists audit_logs_session_id_idx on audit_logs (session_id);
+create index if not exists audit_logs_step_name_idx on audit_logs (step_name);
+
