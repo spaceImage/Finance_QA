@@ -35,7 +35,7 @@ def grounding_check(answer: str, documents, policy_md: str) -> tuple[bool, str]:
     인용까지 "근거 없음"으로 오판하는 거짓 FAIL이 발생합니다)."""
     context = "\n\n---\n\n".join(d.page_content for d in documents) if documents else "(검색된 근거 문서 없음)"
 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, model_kwargs={"response_format": {"type": "json_object"}})
+    llm = ChatOpenAI(model="gpt-5-mini", temperature=0, model_kwargs={"response_format": {"type": "json_object"}})
     prompt = ChatPromptTemplate.from_messages([
         ("system", """당신은 RAG 답변의 근거(grounding) 검증관입니다.
 [개인 보험증권]과 [약관 검색 문서]에 실제로 없는 숫자나 조건을 [답변]이 지어내지 않았는지 확인하세요.

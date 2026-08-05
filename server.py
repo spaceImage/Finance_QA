@@ -5,11 +5,11 @@ from typing import AsyncGenerator, Optional
 from pydantic import BaseModel
 from fastapi import FastAPI, Query, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 
 # main 브랜치 최신 Agentic RAG 파이프라인 연동 및 세션 헬퍼
 from test_rag_graph import run_agentic_rag_json
-from rag_common import create_session, get_session_state, update_session_state
+from rag_common import create_session, get_session_state, update_session_state, load_policy_md
 
 app = FastAPI(title="Finance QA Agentic RAG SSE Server")
 
@@ -52,6 +52,38 @@ class SlotFillRequest(BaseModel):
     slot_key: str
     slot_value: str
     task_name: Optional[str] = "jang"
+
+@app.get("/api/v1/policy/{task_name}")
+def api_get_policy(task_name: str = "jang"):
+    """고객의 보험증권(certificate.md) 원문 텍스트를 반환합니다."""
+    try:
+        policy_md = load_policy_md(task_name)
+        return {
+            "status": "success",
+            "task_name": task_name,
+            "policy_md": policy_md
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"보험증권 로드 실패: {e}")
+
+@app.get("/api/v1/policy-pdf/{task_name}")
+def api_get_policy_pdf(task_name: str = "jang"):
+    """고객의 보험약관 PDF 파일을 반환합니다."""
+    import glob
+    pattern = f"pdf_policy/{task_name[0].upper() if task_name else ''}*보험약관*.pdf"
+    # task_name 이니셜로 파일 검색 (jang -> 장)
+    name_map = {"jang": "장석찬"}
+    person_name = name_map.get(task_name, task_name)
+    matches = glob.glob(f"pdf_policy/{person_name}*.pdf")
+    if not matches:
+        raise HTTPException(status_code=404, detail=f"약관 PDF를 찾을 수 없습니다: {task_name}")
+    from urllib.parse import quote
+    safe_name = quote(f"{person_name}_보험약관.pdf")
+    return FileResponse(
+        matches[0],
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{safe_name}"}
+    )
 
 @app.get("/api/v1/session/{session_id}")
 def api_get_session(session_id: str):
@@ -110,6 +142,13 @@ async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]
     RAG 파이프라인 결과를 SSE(Server-Sent Events) 프로토콜 데이터로 스트리밍 전송합니다.
     """
     try:
+        # 1. 파이프라인 단계 및 프로그레스 이벤트 전송
+        yield f"data: {json.dumps({'step': 1, 'label': '🔮 1단계: 질문 라우팅 및 필수 파라미터 검증 중...', 'progress': 25}, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(0.05)
+
+        yield f"data: {json.dumps({'step': 2, 'label': '🔍 2단계: Supabase 약관 DB 유사도 검색 중...', 'progress': 50}, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(0.05)
+
         # 비동기 스레드 풀에서 RAG 파이프라인 구동
         loop = asyncio.get_event_loop()
         result_json_str = await loop.run_in_executor(
@@ -119,7 +158,12 @@ async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]
         result_data = json.loads(result_json_str)
         answer_text = result_data.get("answer", "")
 
-        # 1. 텍스트 스트리밍 지원 (기존 useSSE 호환)
+        yield f"data: {json.dumps({'step': 3, 'label': '📊 3단계: 약관 조항 관련성 검증 및 추론 완료', 'progress': 75}, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(0.05)
+
+        yield f"data: {json.dumps({'step': 4, 'label': '✍️ 4단계: 손해사정 보상 산출 및 UI 블록 생성 중...', 'progress': 90}, ensure_ascii=False)}\n\n"
+
+        # 2. 텍스트 스트리밍 지원 (기존 useSSE 호환)
         chunk_size = 5
         for i in range(0, len(answer_text), chunk_size):
             chunk = answer_text[i:i+chunk_size]

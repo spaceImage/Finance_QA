@@ -86,7 +86,7 @@ class InsuranceRAGEngine:
         policy_md = self.load_policy_md()
         
         llm = ChatOpenAI(
-            model="gpt-4o-mini", 
+            model="gpt-5-mini", 
             temperature=0, 
             openai_api_key=self.openai_api_key,
             model_kwargs={"response_format": {"type": "json_object"}}
@@ -225,7 +225,7 @@ class InsuranceRAGEngine:
             return {"documents": []}
             
         llm = ChatOpenAI(
-            model="gpt-4o-mini", 
+            model="gpt-5-mini", 
             temperature=0, 
             openai_api_key=self.openai_api_key,
             model_kwargs={"response_format": {"type": "json_object"}}
@@ -275,7 +275,7 @@ class InsuranceRAGEngine:
         question = state["question"]
         loop_count = state["loop_count"]
         
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=self.openai_api_key)
+        llm = ChatOpenAI(model="gpt-5-mini", temperature=0, openai_api_key=self.openai_api_key)
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", """당신은 RAG 검색 확률을 높이기 위해 사용자의 질문을 검색에 최적화된 형태로 재작성하는 전문가입니다.
@@ -303,7 +303,7 @@ class InsuranceRAGEngine:
         policy_md = self.load_policy_md()
         
         llm = ChatOpenAI(
-            model="gpt-4o", 
+            model="gpt-5-mini", 
             temperature=0, 
             openai_api_key=self.openai_api_key,
             model_kwargs={"response_format": {"type": "json_object"}}
@@ -372,13 +372,25 @@ class InsuranceRAGEngine:
         [Ask Slots Node]
         사용자에게 부족한 슬롯 정보를 되물어 보완받기 위한 대기 답변 생성
         """
-        prompt_text = state.get("slot_prompt") or "보목 계산을 위한 추가 정보를 입력해 주세요."
+        prompt_text = state.get("slot_prompt") or "보장 계산을 위한 추가 정보를 입력해 주세요."
         print("\n" + "="*50)
         print("❓ [AI 되묻기 (Slot Filling)]")
         print("="*50)
         print(prompt_text)
         print("="*50)
-        return {"generation": prompt_text}
+        blocks = [
+            {
+                "block_type": "CONTEXT",
+                "title": "상황 파악 및 필수 조건 검사",
+                "content": f"질문: {state.get('question', '')}"
+            },
+            {
+                "block_type": "CAUTION",
+                "title": "추가 정보 보완 필요 (Slot Filling)",
+                "content": prompt_text
+            }
+        ]
+        return {"generation": prompt_text, "blocks": blocks}
 
     def decide_to_ask_slots(self, state: AgentState) -> Literal["ask_slots", "retrieve"]:
         if state.get("missing_slots"):
@@ -407,7 +419,14 @@ class InsuranceRAGEngine:
         print("="*50)
         print(message)
         print("="*50)
-        return {"generation": message}
+        blocks = [
+            {
+                "block_type": "CAUTION",
+                "title": "약관 정보 검색 결과 안내",
+                "content": message
+            }
+        ]
+        return {"generation": message, "blocks": blocks}
 
     def _build_graph(self) -> StateGraph:
         workflow = StateGraph(AgentState)
@@ -591,11 +610,21 @@ def run_agentic_rag_json(query: str, task_name: str = "jang", slot_values: Optio
         for doc in final_state.get("documents", [])
     ]
 
+    blocks = final_state.get("blocks") or []
+    if not blocks and final_state.get("generation"):
+        blocks = [
+            {
+                "block_type": "RETRIEVAL_RESULT",
+                "title": "약관 검색 결과 및 보장 내역",
+                "items": [final_state.get("generation", "")]
+            }
+        ]
+
     output_data = {
         "query": query,
         "status": "NEED_MORE_INFO" if final_state.get("is_valid") is False else "SUCCESS",
         "answer": final_state.get("generation", ""),
-        "blocks": final_state.get("blocks") or [],
+        "blocks": blocks,
         "total_referenced_count": len(referenced_pages),
         "referenced_pages": referenced_pages,
     }

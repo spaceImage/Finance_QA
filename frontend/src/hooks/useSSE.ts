@@ -20,12 +20,21 @@ export interface UIBlock {
   items?: (string | BlockItem)[];
 }
 
+export interface StepLog {
+  step: number;
+  label: string;
+  timestamp: string;
+}
+
 interface UseSSEReturn {
   data: string;
   blocks: UIBlock[];
   status: string;
   isLoading: boolean;
   isCompleted: boolean;
+  progress: number;
+  currentStepLabel: string;
+  stepLogs: StepLog[];
   error: string | null;
   sessionId: string | null;
   startStream: (query: string, taskName?: string) => Promise<void>;
@@ -40,6 +49,9 @@ export function useSSE(): UseSSEReturn {
   const [status, setStatus] = useState<string>("SUCCESS");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
+  const [progress, setProgress] = useState<number>(0);
+  const [currentStepLabel, setCurrentStepLabel] = useState<string>("");
+  const [stepLogs, setStepLogs] = useState<StepLog[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
@@ -58,6 +70,9 @@ export function useSSE(): UseSSEReturn {
     setData("");
     setBlocks([]);
     setStatus("SUCCESS");
+    setProgress(0);
+    setCurrentStepLabel("");
+    setStepLogs([]);
     setError(null);
     setIsCompleted(false);
   }, [stopStream]);
@@ -86,6 +101,10 @@ export function useSSE(): UseSSEReturn {
     async (query: string, taskName: string = "jang") => {
       resetStream();
       setIsLoading(true);
+      setProgress(15);
+      const initLabel = "🔮 1단계: 파이프라인 초기화 및 라우팅 분석 중...";
+      setCurrentStepLabel(initLabel);
+      setStepLogs([{ step: 1, label: initLabel, timestamp: new Date().toLocaleTimeString() }]);
 
       const activeSessionId = await createSession(taskName);
 
@@ -107,14 +126,25 @@ export function useSSE(): UseSSEReturn {
           try {
             if (event.data === "[DONE]") {
               setIsCompleted(true);
+              setProgress(100);
               stopStream();
               return;
             }
 
             const parsed = JSON.parse(event.data);
-            if (parsed.blocks && Array.isArray(parsed.blocks)) {
+            if (parsed.progress !== undefined) {
+              setProgress(parsed.progress);
+              if (parsed.label) {
+                setCurrentStepLabel(parsed.label);
+                setStepLogs((prev) => [
+                  ...prev,
+                  { step: parsed.step || prev.length + 1, label: parsed.label, timestamp: new Date().toLocaleTimeString() }
+                ]);
+              }
+            } else if (parsed.blocks && Array.isArray(parsed.blocks)) {
               setBlocks(parsed.blocks);
               if (parsed.status) setStatus(parsed.status);
+              setProgress(100);
             } else if (parsed.content) {
               setData((prev) => prev + parsed.content);
             }
@@ -186,6 +216,9 @@ export function useSSE(): UseSSEReturn {
     status,
     isLoading,
     isCompleted,
+    progress,
+    currentStepLabel,
+    stepLogs,
     error,
     sessionId,
     startStream,
