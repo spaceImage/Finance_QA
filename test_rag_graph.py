@@ -303,14 +303,19 @@ class InsuranceRAGEngine:
     async def generate(self, state: AgentState) -> Dict[str, Any]:
         """
         [Generate Node]
-        개인 증권 정보와 필터링된 약관 문서를 결합하여 구체적인 보험금 액수를 직접 계산하여 답변합니다.
+        개인 증권 정보와 필터링된 약관 문서를 결합하여 구조화된 UI Block JSON 및 답변을 생성합니다.
         """
-        print("✍️ [Generate Node] 최종 답변 작성 중...")
+        print("✍️ [Generate Node] 구조화된 UI Block 및 답변 작성 중...")
         question = state["question"]
         documents = state["documents"]
         policy_md = self.load_policy_md()
         
-        llm = ChatOpenAI(model="gpt-4o", temperature=0, openai_api_key=self.openai_api_key)
+        llm = ChatOpenAI(
+            model="gpt-4o", 
+            temperature=0, 
+            openai_api_key=self.openai_api_key,
+            model_kwargs={"response_format": {"type": "json_object"}}
+        )
         
         context_text_list = []
         for doc in documents:
@@ -319,50 +324,27 @@ class InsuranceRAGEngine:
             )
         context_combined = "\n\n---\n\n".join(context_text_list)
         
-        prompt = f"""당신은 보험 약관 및 개인 보험증권 분석 전문 AI 상담원입니다.
-아래 제공된 [개인 보험증권 정보]와 [약관 참고 문서]를 대조하여 사용자의 질문에 정확하고 친절하게 답변해 주세요.
-
-⚠️ 답변 작성 규칙:
-1. 약관 참고 문서에는 지급 기준이 비율(%)로 나와 있는 경우가 많습니다. 이 경우, [개인 보험증권 정보]에서 해당 특약의 '보험가입금액'을 찾아 실제 지급될 구체적인 보험금 액수(예: 3,000만원의 30% = 900만원)를 직접 계산하여 답변에 명시해 주세요.
-   단, 계산에 쓰는 비율(%)이나 공제금액은 반드시 **지금 답변하려는 그 항목의 조항에 실제로 적힌 숫자**여야 합니다.
-   "실손보험은 보통 급여 90%를 보상한다"처럼 일반적인 보험 상식이나 다른 조항(예: 입원형)에서 본 숫자를
-   가져와 적용하지 마세요 — 해당 조항에 비율이 없으면(예: 공제금액만 빼고 한도까지 보상) 비율 없이 그대로 계산하세요.
-2. 각 청구 및 진단 시점에 약관상 면책 기간(예: 가입 후 90일 면책)이나 지급 한도(예: 1회 입원당 120일 한도) 등의 제약 사항이 걸려 있다면, 질문 상황과 비교하여 지급 가능 여부를 팩트체크하여 알려주세요.
-3. 정보의 출처(특약명 및 약관 페이지 번호, 개인 보험증권 등)를 반드시 답변에 명시해 주세요.
-4. [개인 보험증권 정보]는 이 고객이 가입한 특약의 '전체' 목록입니다(빠짐없이 다 나와 있음). 질문한 보장 항목이
-   이 목록의 어떤 특약과도 관련이 없다면, "확인이 필요합니다"처럼 얼버무리지 말고
-   "가입하신 보장 항목에는 OOO가 포함되어 있지 않아, 이 건으로는 보험금을 받으실 수 없습니다."처럼
-   가입하지 않았다는 사실 자체를 근거로 확정적으로 답변하세요. (단, [약관 참고 문서]에서 관련 조항이 실제로
-   검색되었는데 세부 지급조건만 불분명한 경우에는 그 조항을 근거로 답변하고, 이 규칙을 적용하지 마세요.)
-5. 추상적이거나 '보험사에 문의하세요', '약관을 직접 확인해 보세요' 같이 사용자를 다른 곳으로 떠넘기는
-   원론적인 답변은 절대 금지합니다. 판단은 항상 당신이 직접 내려서 답변하세요.
-6. 약관 원문에 직접 적히지 않은 가상의 임의 예시 숫자(예: '1,000만원 발생 시 900만원 보상된다' 등)는 지어내지 마세요.
-7. 답변은 반드시 한국어로 작성하고, 문장 끝에 마침표를 붙여 완결된 문장으로 작성하세요.
-
-[개인 보험증권 정보]
-{policy_md}
-
-[약관 참고 문서]
-{context_combined}
-
-[사용자 질문]
-{question}
-"""
+        prompt = GENERATE_BLOCK_SYSTEM_PROMPT.format(
+            policy_md=policy_md,
+            context=context_combined
+        ) + f"\n\n[사용자 질문]\n{question}"
         
         try:
+            res = await llm.ainvoke(prompt)
+            parsed = json.loads(res.content)
+            answer = parsed.get("answer", "")
+            blocks = parsed.get("blocks", [])
             print("\n" + "="*50)
-            print("📊 [최종 답변 결과]")
+            print("📊 [최종 구조화 답변 결과]")
+            print(f"Answer: {answer}")
+            print(f"Blocks ({len(blocks)}개): {[b.get('block_type') for b in blocks]}")
             print("="*50)
-            full_text = ""
-            async for chunk in llm.astream(prompt):
-                piece = chunk.content or ""
-                print(piece, end="", flush=True)
-                full_text += piece
-            print("\n" + "="*50)
-            return {"generation": full_text}
+            return {"generation": answer, "blocks": blocks}
         except Exception as e:
-            print(f"⚠️ 답변 생성 오류: {e}")
-            return {"generation": f"오류로 인해 답변을 생성하지 못했습니다: {e}"}
+            print(f"⚠️ 답변 생성 중 오류 발생: {e}")
+            fallback_msg = "약관 대조 중 오류가 발생하여 기본 안내를 출력합니다."
+            return {"generation": fallback_msg, "blocks": []}
+
 
     def decide_to_generate(self, state: AgentState) -> Literal["generate", "rewrite_query", "fallback_generate"]:
         filtered_documents = state["documents"]

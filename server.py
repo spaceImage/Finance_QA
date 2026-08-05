@@ -38,16 +38,27 @@ async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]
         result_data = json.loads(result_json_str)
         answer_text = result_data.get("answer", "")
 
-        # 글자 단위 스트리밍 전송 (chunk 단위)
+        # 1. 텍스트 스트리밍 지원 (기존 useSSE 호환)
         chunk_size = 5
         for i in range(0, len(answer_text), chunk_size):
             chunk = answer_text[i:i+chunk_size]
             payload = json.dumps({"content": chunk}, ensure_ascii=False)
             yield f"data: {payload}\n\n"
-            await asyncio.sleep(0.02)  # 실시간 스트리밍 타자기 효과
+            await asyncio.sleep(0.01)
+
+        # 2. 최종 구조화 UI Block payload 및 메타데이터 전송
+        final_payload = json.dumps({
+            "status": result_data.get("status", "SUCCESS"),
+            "answer": answer_text,
+            "blocks": result_data.get("blocks", []),
+            "total_referenced_count": result_data.get("total_referenced_count", 0),
+            "referenced_pages": result_data.get("referenced_pages", [])
+        }, ensure_ascii=False)
+        yield f"data: {final_payload}\n\n"
 
         # SSE 완료 신호
         yield "data: [DONE]\n\n"
+
 
     except Exception as e:
         error_payload = json.dumps({"error": str(e)}, ensure_ascii=False)
