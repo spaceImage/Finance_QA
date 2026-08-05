@@ -19,6 +19,7 @@ from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langgraph.graph import StateGraph, START, END
 
 from rag_common import get_embeddings, get_vectorstore, load_policy_md as _load_policy_md, get_enrolled_sections
+from prompts import ROUTER_SYSTEM_PROMPT, MULTIHOP_CHECK_PROMPT, GENERATE_BLOCK_SYSTEM_PROMPT
 
 # .env 파일 로드
 load_dotenv()
@@ -32,6 +33,10 @@ class AgentState(TypedDict):
     documents: List[Document]
     generation: str
     loop_count: int
+    is_valid: Optional[bool]
+    missing_info: Optional[str]
+    blocks: Optional[List[Dict[str, Any]]]
+
 
 
 class InsuranceRAGEngine:
@@ -178,7 +183,32 @@ class InsuranceRAGEngine:
                         doc_set[d.page_content] = d
 
             print(f"📦 검색된 총 문서 수: {len(docs)}개")
+
+            # 3단계: Multi-hop 2차 연쇄 참조 (별표 X 참조, 제O조 참조) 감지 및 보충 검색
+            import re
+            chain_refs = []
+            for doc in docs:
+                matches = re.findall(r'(별표\s*\d+|제\s*\d+\s*조|별첨\s*\d*)', doc.page_content)
+                for m in matches:
+                    clean_m = m.strip()
+                    if clean_m not in chain_refs and len(clean_m) <= 15:
+                        chain_refs.append(clean_m)
+            
+            if chain_refs:
+                print(f"🔗 [Multi-hop Node] 2차 연쇄 참조 조항 감지: {chain_refs}")
+                for ref_kw in chain_refs[:2]:
+                    sub_candidates = await asyncio.to_thread(
+                        vectorstore.similarity_search, f"{question} {ref_kw}", k=2, filter=task_filter
+                    )
+                    doc_set = {d.page_content: d for d in docs}
+                    for sub_d in sub_candidates:
+                        if sub_d.page_content not in doc_set:
+                            docs.append(sub_d)
+                            doc_set[sub_d.page_content] = sub_d
+                print(f"📦 Multi-hop 보충 후 총 문서 수: {len(docs)}개")
+
             return {"documents": docs}
+
         except Exception as e:
             print(f"⚠️ 문서 검색 중 오류 발생: {e}. 필터 없이 재시도합니다.")
             try:
@@ -503,11 +533,14 @@ def run_agentic_rag_json(query: str, task_name: str = "jang") -> str:
 
     output_data = {
         "query": query,
+        "status": "NEED_MORE_INFO" if final_state.get("is_valid") is False else "SUCCESS",
         "answer": final_state.get("generation", ""),
+        "blocks": final_state.get("blocks") or [],
         "total_referenced_count": len(referenced_pages),
         "referenced_pages": referenced_pages,
     }
     return json.dumps(output_data, ensure_ascii=False, indent=2)
+
 
 
 DEMO_QUERIES = [
