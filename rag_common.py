@@ -85,3 +85,59 @@ def clear_task_documents(task_name: str) -> None:
     """재구축(step_3) 전, 해당 인물의 기존 벡터를 모두 삭제해 중복 적재를 막습니다."""
     client = get_supabase_client()
     client.table(DOCUMENTS_TABLE).delete().eq("metadata->>task_name", task_name).execute()
+
+
+def create_session(task_name: str, counselor_id: str | None = None, metadata: dict | None = None) -> str | None:
+    """새로운 상담 세션을 sessions 테이블에 생성하고 session_id (uuid string)를 반환합니다."""
+    try:
+        client = get_supabase_client()
+        res = client.table("sessions").insert({
+            "task_name": task_name,
+            "counselor_id": counselor_id,
+            "metadata": metadata or {},
+        }).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0].get("id")
+    except Exception as e:
+        print(f"⚠️ session 생성 중 오류 발생: {e}")
+    return None
+
+
+def save_audit_log(
+    session_id: str | None,
+    step_name: str,
+    status: str = "SUCCESS",
+    input_payload: dict | None = None,
+    output_payload: dict | None = None,
+    execution_time_ms: int = 0
+) -> dict | None:
+    """RAG 오케스트레이터 각 단계(S1~S4)의 실행 이력을 audit_logs 테이블에 기록합니다."""
+    if not session_id:
+        return None
+    try:
+        client = get_supabase_client()
+        res = client.table("audit_logs").insert({
+            "session_id": session_id,
+            "step_name": step_name,
+            "status": status,
+            "input_payload": input_payload or {},
+            "output_payload": output_payload or {},
+            "execution_time_ms": execution_time_ms
+        }).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0]
+    except Exception as e:
+        print(f"⚠️ audit_log 저장 중 오류 발생 ({step_name}): {e}")
+    return None
+
+
+def get_session_audit_logs(session_id: str) -> list[dict]:
+    """특정 세션의 전체 audit_logs 이력을 생성 시각 순으로 조회합니다."""
+    try:
+        client = get_supabase_client()
+        res = client.table("audit_logs").select("*").eq("session_id", session_id).order("created_at").execute()
+        return res.data or []
+    except Exception as e:
+        print(f"⚠️ audit_logs 조회 중 오류 발생: {e}")
+        return []
+
