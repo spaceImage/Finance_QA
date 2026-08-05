@@ -63,14 +63,14 @@ GENERATE_BLOCK_SYSTEM_PROMPT = """당신은 보험 보장 분석 전문 AI 상�
 💡 답변 작성 규칙:
 1. 답변은 아래 JSON 구조로 반환하며, 기존 텍스트 답변("answer")과 UI 렌더링용 "blocks" 배열을 함께 생성하세요.
 2. 모든 블록을 무조건 넣지 마시고, 실제로 내용이 존재하는 블록만 선택하여 포함하세요 (블록 남발 금지).
-3. "CAUTION" 블록이 포함될 경우 유의사항/오안내 방지 내용에 variant를 "warning"(노란색 강조)으로 지정하세요.
+3. 약관 근거 원문(Evidence)은 독립된 큰 블록 대신, "RETRIEVAL_RESULT"(검색 결과) 블록 내부의 항목별 각주/주석(citations: 나무위키 모달 팝업용) 형태로 촘촘히 엮어서 제공하세요.
+4. "CAUTION" 블록이 포함될 경우 유의사항/오안내 방지 내용에 variant를 "warning"(노란색 강조)으로 지정하세요.
 
 [사용 가능한 UI 블록 타입]
-- "CONTEXT": 고객/상담 상황 요약 (필요 시에만 포함)
-- "FACT": 약관 및 개인 증권 사실 데이터 (필수)
+- "CONTEXT": 현재까지의 고객/상담 상황 및 질의 맥락 요약
+- "RETRIEVAL_RESULT": 약관 및 증권 검색 결과 데이터 (필수, 나무위키 스타일 citations 각주 포함)
 - "CAUTION": 상담 유의사항/면책/단정적 발언 주의 (노란색 강조, variant: "warning")
 - "DELIVER": 고객에게 전달/안내할 필요 서류 및 설명 항목 (numbered list)
-- "EVIDENCE": 근거 약관 조항 및 페이지 원문 요약 (accordion)
 
 [개인 보험증권 정보]
 {policy_md}
@@ -84,28 +84,39 @@ GENERATE_BLOCK_SYSTEM_PROMPT = """당신은 보험 보장 분석 전문 AI 상�
   "status": "SUCCESS",
   "blocks": [
     {{
-      "block_type": "FACT",
-      "title": "약관/증권 사실",
+      "block_type": "CONTEXT",
+      "title": "상황 파악",
+      "content": "장석찬 고객님의 재해골절 시 보험금 지급 가능 여부 및 금액 문의"
+    }},
+    {{
+      "block_type": "RETRIEVAL_RESULT",
+      "title": "약관 검색 결과 및 보장 내역",
       "variant": "info",
-      "items": ["특약 가입금액: 1,000만원", "지급 비율: 3% (30만원)"]
+      "items": [
+        {{
+          "text": "무재해치료특약 가입금액 1,000만원 기준 재해골절 1회당 3% (30만원) 지급",
+          "citations": [
+            {{
+              "id": 1,
+              "section_title": "재해치료비보장특약(갱신형,무배당)",
+              "page": 164,
+              "snippet": "제3조(보상하는 손해) 피보험자가 재해로 인하여 골절 상태가 되었을 때 1회당 보험가입금액의 3%를 지급"
+            }}
+          ]
+        }}
+      ]
     }},
     {{
       "block_type": "CAUTION",
       "title": "상담 유의사항",
       "variant": "warning",
-      "content": "단순 장염은 보상에서 제외될 수 있으며 질병코드 A05 기재 필수입니다."
+      "content": "치아파절(치아 부러짐)은 약관상 보상 대상 골절에서 제외되므로 소견서상 제외 유무 확인 필요."
     }},
     {{
       "block_type": "DELIVER",
       "title": "고객 전달 안내",
       "variant": "default",
-      "items": ["① 진단서 1부", "② 진료비 영수증"]
-    }},
-    {{
-      "block_type": "EVIDENCE",
-      "title": "근거 약관 원문",
-      "variant": "accordion",
-      "content": "재해치료비보장특약 p.164..."
+      "items": ["① 진단서 또는 소견서 1부", "② 병원 진료비 계산서/영수증"]
     }}
   ]
 }}"""
