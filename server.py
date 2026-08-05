@@ -47,6 +47,12 @@ def api_create_session(req: CreateSessionRequest):
         "task_name": req.task_name
     }
 
+class SlotFillRequest(BaseModel):
+    session_id: str
+    slot_key: str
+    slot_value: str
+    task_name: Optional[str] = "jang"
+
 @app.get("/api/v1/session/{session_id}")
 def api_get_session(session_id: str):
     """세션 상태 및 대화 히스토리를 조회합니다."""
@@ -57,6 +63,46 @@ def api_get_session(session_id: str):
         "status": "success",
         "session": session_info
     }
+
+@app.post("/api/v1/chat/slot-fill")
+async def api_slot_fill(req: SlotFillRequest):
+    """
+    부족한 필수 조건(슬롯) 데이터를 보완 전송받아 기존 세션에 누적 업데이트하고
+    RAG 파이프라인을 재개하여 최종 보상 정밀 결과를 반환합니다.
+    """
+    # 1. 기존 세션 정보 조회
+    session_info = get_session_state(req.session_id)
+    if not session_info:
+        raise HTTPException(status_code=404, detail="해당 세션을 찾을 수 없습니다.")
+
+    # 2. 슬롯 데이터 누적 업데이트
+    current_meta = session_info.get("metadata", {})
+    existing_slots = current_meta.get("slot_values", {})
+    existing_slots[req.slot_key] = req.slot_value
+    
+    update_success = update_session_state(req.session_id, {"slot_values": existing_slots})
+    if not update_success:
+        raise HTTPException(status_code=500, detail="슬롯 상태 업데이트에 실패했습니다.")
+
+    # 3. 보완된 질문 컨텍스트 생성 후 RAG 구동
+    last_query = current_meta.get("last_query", "보험금 보상 계산 요청")
+    augmented_query = f"{last_query} (보완 정보: {req.slot_key}={req.slot_value})"
+    
+    import functools
+    loop = asyncio.get_event_loop()
+    result_json_str = await loop.run_in_executor(
+        None, functools.partial(run_agentic_rag_json, augmented_query, req.task_name, slot_values=existing_slots)
+    )
+    result_data = json.loads(result_json_str)
+
+    return {
+        "status": "success",
+        "session_id": req.session_id,
+        "updated_slot": {req.slot_key: req.slot_value},
+        "all_slots": existing_slots,
+        "result": result_data
+    }
+
 
 
 async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]:
