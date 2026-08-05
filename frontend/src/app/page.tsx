@@ -14,12 +14,24 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
 
-  const { data, blocks, isLoading, isCompleted, error, startStream, resetStream } = useSSE();
+  const { data, blocks, isLoading, isCompleted, error, sessionId, startStream, sendSlotFill, resetStream } = useSSE();
+
+  const isSlotAsking = data.includes("입원 일수") || data.includes("Slot Filling") || data.includes("추가 정보");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim() || isLoading) return;
-    startStream(query);
+
+    const currentInput = query;
+    setQuery("");
+
+    if (isSlotAsking && sessionId) {
+      // 되묻기 상황인 경우 방법 1 (POST /api/v1/chat/slot-fill API) 호출
+      sendSlotFill("hospital_days", currentInput);
+    } else {
+      // 일반 첫 질문인 경우 스트리밍 구동
+      startStream(currentInput);
+    }
   };
 
   const handleSampleClick = (sample: string) => {

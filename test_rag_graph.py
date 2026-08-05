@@ -36,7 +36,9 @@ class AgentState(TypedDict):
     is_valid: Optional[bool]
     missing_info: Optional[str]
     blocks: Optional[List[Dict[str, Any]]]
-
+    missing_slots: Optional[List[str]]
+    slot_values: Optional[Dict[str, Any]]
+    slot_prompt: Optional[str]
 
 
 class InsuranceRAGEngine:
@@ -336,6 +338,53 @@ class InsuranceRAGEngine:
             return {"generation": fallback_msg, "blocks": []}
 
 
+    async def check_slots(self, state: AgentState) -> Dict[str, Any]:
+        """
+        [Check Slots Node]
+        질문에서 보상 계산 필수 정보(입원일수, 수술방식, 암병기 등)가 빠져 있는지 점검합니다.
+        """
+        print("❓ [Check Slots Node] 필수 슬롯(보상 조건) 유무 검사 중...")
+        question = state["question"]
+        slot_values = state.get("slot_values") or {}
+
+        missing_slots = []
+        slot_prompt = None
+
+        # 1. 입원 관련 필수 슬롯 체크
+        has_days_in_text = any(kw in question for kw in ["일간", "일동안", "며칠", "일간 입원", "5일", "3일", "7일", "hospital_days", "보완 정보"])
+        if any(kw in question for kw in ["입원", "식중독"]) and "hospital_days" not in slot_values and not has_days_in_text:
+            missing_slots.append("hospital_days")
+            slot_prompt = "피보험자님, 정확한 입원 일수를 알려주시면 보상 금액을 정밀 계산해 드릴 수 있습니다. (예: 5일 입원)"
+
+        if missing_slots and slot_prompt:
+            print(f"⚠️ 필수 슬롯 누락 감지: {missing_slots} -> 되묻기 발동!")
+            return {
+                "missing_slots": missing_slots,
+                "slot_prompt": slot_prompt,
+                "generation": slot_prompt
+            }
+
+        print("🟢 필수 슬롯 검사 통과. 약관 검색으로 진행합니다.")
+        return {"missing_slots": [], "slot_prompt": None}
+
+    async def ask_slots(self, state: AgentState) -> Dict[str, Any]:
+        """
+        [Ask Slots Node]
+        사용자에게 부족한 슬롯 정보를 되물어 보완받기 위한 대기 답변 생성
+        """
+        prompt_text = state.get("slot_prompt") or "보목 계산을 위한 추가 정보를 입력해 주세요."
+        print("\n" + "="*50)
+        print("❓ [AI 되묻기 (Slot Filling)]")
+        print("="*50)
+        print(prompt_text)
+        print("="*50)
+        return {"generation": prompt_text}
+
+    def decide_to_ask_slots(self, state: AgentState) -> Literal["ask_slots", "retrieve"]:
+        if state.get("missing_slots"):
+            return "ask_slots"
+        return "retrieve"
+
     def decide_to_generate(self, state: AgentState) -> Literal["generate", "rewrite_query", "fallback_generate"]:
         filtered_documents = state["documents"]
         loop_count = state["loop_count"]
@@ -364,6 +413,8 @@ class InsuranceRAGEngine:
         workflow = StateGraph(AgentState)
         
         workflow.add_node("route_question", self.route_question)
+        workflow.add_node("check_slots", self.check_slots)
+        workflow.add_node("ask_slots", self.ask_slots)
         workflow.add_node("retrieve", self.retrieve)
         workflow.add_node("grade_documents", self.grade_documents)
         workflow.add_node("rewrite_query", self.rewrite_query)
@@ -371,7 +422,17 @@ class InsuranceRAGEngine:
         workflow.add_node("fallback_generate", self.fallback_generate)
         
         workflow.add_edge(START, "route_question")
-        workflow.add_edge("route_question", "retrieve")
+        workflow.add_edge("route_question", "check_slots")
+        
+        workflow.add_conditional_edges(
+            "check_slots",
+            self.decide_to_ask_slots,
+            {
+                "ask_slots": "ask_slots",
+                "retrieve": "retrieve"
+            }
+        )
+        
         workflow.add_edge("retrieve", "grade_documents")
         
         workflow.add_conditional_edges(
@@ -385,28 +446,32 @@ class InsuranceRAGEngine:
         )
         
         workflow.add_edge("rewrite_query", "retrieve")
+        workflow.add_edge("ask_slots", END)
         workflow.add_edge("generate", END)
         workflow.add_edge("fallback_generate", END)
         
         return workflow.compile()
 
-    async def ainvoke(self, query: str) -> Dict[str, Any]:
+    async def ainvoke(self, query: str, slot_values: Optional[dict] = None) -> Dict[str, Any]:
         inputs = {
             "question": query,
             "section_filters": [],
             "documents": [],
             "generation": "",
-            "loop_count": 0
+            "loop_count": 0,
+            "missing_slots": [],
+            "slot_values": slot_values or {},
+            "slot_prompt": None
         }
         return await self.app.ainvoke(inputs)
 
-    def invoke(self, query: str) -> Dict[str, Any]:
+    def invoke(self, query: str, slot_values: Optional[dict] = None) -> Dict[str, Any]:
         """
         [Sync Invoke]
         동기적으로 그래프를 실행합니다.
         """
         try:
-            return asyncio.run(self.ainvoke(query))
+            return asyncio.run(self.ainvoke(query, slot_values))
         except RuntimeError:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -511,10 +576,10 @@ def run_agentic_rag(query: str, task_name: str = "jang"):
     print("="*50)
 
 
-def run_agentic_rag_json(query: str, task_name: str = "jang") -> str:
+def run_agentic_rag_json(query: str, task_name: str = "jang", slot_values: Optional[dict] = None) -> str:
     """[API/화면용] 기존 run_agentic_rag_json 함수와의 호환성을 보장합니다."""
     engine = InsuranceRAGEngine(task_name=task_name)
-    final_state = engine.invoke(query)
+    final_state = engine.invoke(query, slot_values=slot_values)
 
     referenced_pages = [
         {
