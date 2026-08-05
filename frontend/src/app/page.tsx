@@ -1,18 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { useSSE } from "@/hooks/useSSE";
+import { useSSE, Citation, BlockItem, UIBlock } from "@/hooks/useSSE";
 
 const SAMPLE_QUESTIONS = [
-  "나 장염 걸려서 수액 맞았는데 10만원 나왔어 보상 얼마 돼?",
+  "장석찬님이 통원 치료 시 의원급에서 12만원 지출했는데 보상 얼마 되나요?",
+  "장석찬님이 식중독으로 5일간 입원한 경우 지급받을 수 있는 총 보험금은 얼마인가요?",
   "갑상선암 진단 시 받을 수 있는 혜택이 뭐야?",
-  "뇌졸중 수술 시 수술비 지급 기준 알려줘",
-  "재해골절 시 몇 만원 보상돼?",
+  "장석찬님이 재해골절로 통원 치료 시 받을 수 있는 보험금은 얼마인가요?",
 ];
 
 export default function Home() {
   const [query, setQuery] = useState("");
-  const { data, isLoading, isCompleted, error, startStream, resetStream } = useSSE();
+  const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
+
+  const { data, blocks, isLoading, isCompleted, error, startStream, resetStream } = useSSE();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,7 +28,7 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-4 md:p-8 font-sans">
+    <main className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-4 md:p-8 font-sans relative">
       {/* Header */}
       <header className="max-w-4xl mx-auto w-full flex items-center justify-between pb-6 border-b border-slate-800">
         <div className="flex items-center space-x-3">
@@ -48,7 +50,7 @@ export default function Home() {
       {/* Main Content Area */}
       <section className="max-w-4xl mx-auto w-full my-6 flex-1 flex flex-col justify-center">
         {/* Sample Questions Chips */}
-        {!data && !isLoading && (
+        {!data && blocks.length === 0 && !isLoading && (
           <div className="mb-8">
             <p className="text-sm font-medium text-slate-400 mb-3">💡 자주 묻는 질문 선택</p>
             <div className="flex flex-wrap gap-2">
@@ -65,17 +67,17 @@ export default function Home() {
           </div>
         )}
 
-        {/* Response Card */}
-        {(data || isLoading || error) && (
+        {/* Response Container */}
+        {(data || blocks.length > 0 || isLoading || error) && (
           <div className="w-full bg-slate-900/80 backdrop-blur border border-slate-800 rounded-2xl p-6 shadow-xl mb-6 min-h-[250px] flex flex-col">
             <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-800">
               <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider flex items-center gap-2">
-                🤖 AI 손해사정 정밀 검증 답변
+                🤖 AI 손해사정 정밀 검증 대시보드
               </span>
               {isLoading && (
                 <span className="text-xs text-indigo-400 animate-pulse flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping"></span>
-                  실시간 약관 탐색 & 스트리밍 중...
+                  실시간 약관 탐색 & RAG 분석 중...
                 </span>
               )}
               {isCompleted && (
@@ -84,15 +86,96 @@ export default function Home() {
             </div>
 
             {error && (
-              <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-sm">
+              <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-sm mb-4">
                 ⚠️ {error}
               </div>
             )}
 
-            {/* SSE Stream Text Output */}
-            <div className="prose prose-invert max-w-none text-slate-200 text-sm leading-relaxed whitespace-pre-wrap flex-1">
-              {data || (isLoading && "약관 데이터베이스 검색 및 분석을 시작합니다...")}
+            {/* Plain Answer Text Stream */}
+            <div className="prose prose-invert max-w-none text-slate-200 text-sm leading-relaxed whitespace-pre-wrap mb-4">
+              {data || (isLoading && "약관 데이터베이스 검색 및 분석을 진행하고 있습니다...")}
             </div>
+
+            {/* Structured UI Blocks */}
+            {blocks.length > 0 && (
+              <div className="space-y-4 pt-4 border-t border-slate-800/80">
+                {blocks.map((block, bIdx) => {
+                  if (block.block_type === "CONTEXT") {
+                    return (
+                      <div key={bIdx} className="p-3 bg-slate-800/60 border border-slate-700/50 rounded-xl">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                          📌 {block.title || "상황 파악"}
+                        </span>
+                        <p className="text-xs text-slate-300">{block.content}</p>
+                      </div>
+                    );
+                  }
+
+                  if (block.block_type === "RETRIEVAL_RESULT") {
+                    return (
+                      <div key={bIdx} className="p-4 bg-blue-950/30 border border-blue-800/40 rounded-xl">
+                        <h3 className="text-sm font-bold text-blue-300 mb-2 flex items-center gap-2">
+                          🔍 {block.title || "약관 검색 결과 및 보장 내역"}
+                        </h3>
+                        <ul className="space-y-2">
+                          {block.items?.map((item, iIdx) => {
+                            if (typeof item === "string") {
+                              return <li key={iIdx} className="text-xs text-slate-200">• {item}</li>;
+                            }
+                            const blockItem = item as BlockItem;
+                            return (
+                              <li key={iIdx} className="text-xs text-slate-200 flex flex-wrap items-center gap-1.5">
+                                <span>• {blockItem.text}</span>
+                                {blockItem.citations?.map((c, cIdx) => (
+                                  <button
+                                    key={cIdx}
+                                    onClick={() => setActiveCitation(c)}
+                                    className="px-1.5 py-0.5 rounded bg-blue-600/30 hover:bg-blue-600/60 border border-blue-400/40 text-[10px] font-semibold text-blue-300 hover:text-white transition-all cursor-pointer"
+                                    title="나무위키 각주: 클릭 시 약관 원문 팝업"
+                                  >
+                                    [{c.id || cIdx + 1}]
+                                  </button>
+                                ))}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    );
+                  }
+
+                  if (block.block_type === "CAUTION") {
+                    return (
+                      <div key={bIdx} className="p-4 bg-amber-950/40 border border-amber-500/40 rounded-xl text-amber-200">
+                        <h3 className="text-sm font-bold text-amber-400 mb-1 flex items-center gap-2">
+                          ⚠️ {block.title || "상담 유의사항"}
+                        </h3>
+                        <p className="text-xs leading-relaxed">{block.content}</p>
+                      </div>
+                    );
+                  }
+
+                  if (block.block_type === "DELIVER") {
+                    return (
+                      <div key={bIdx} className="p-4 bg-slate-900 border border-slate-800 rounded-xl">
+                        <h3 className="text-sm font-bold text-indigo-300 mb-2">
+                          📋 {block.title || "고객 전달 안내 서류"}
+                        </h3>
+                        <ul className="space-y-1">
+                          {block.items?.map((item, iIdx) => (
+                            <li key={iIdx} className="text-xs text-slate-300">
+                              {typeof item === "string" ? item : item.text}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  }
+
+                  return null;
+                })}
+              </div>
+            )}
 
             {data && (
               <div className="pt-4 mt-4 border-t border-slate-800/60 flex justify-end">
@@ -107,6 +190,43 @@ export default function Home() {
           </div>
         )}
       </section>
+
+      {/* 나무위키 스타일 모달 팝업 Modal Popup for Citations */}
+      {activeCitation && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-slate-900 border border-blue-500/40 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <span className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
+                📖 약관 원문 각주 [{activeCitation.id}]
+              </span>
+              <button
+                onClick={() => setActiveCitation(null)}
+                className="text-slate-400 hover:text-white text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-bold text-slate-100">{activeCitation.section_title}</h4>
+              <p className="text-xs text-slate-400">약관 위치: {activeCitation.page}페이지</p>
+            </div>
+
+            <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 leading-relaxed max-h-60 overflow-y-auto">
+              "{activeCitation.snippet}"
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={() => setActiveCitation(null)}
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-lg transition-all"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Input Form Footer */}
       <footer className="max-w-4xl mx-auto w-full">
@@ -133,7 +253,7 @@ export default function Home() {
           </button>
         </form>
         <p className="text-[11px] text-center text-slate-500 mt-2">
-          Shift + Enter 키로 줄바꿈 | SSE Server-Sent Events 지원
+          Shift + Enter 키로 줄바꿈 | 나무위키 모달 각주 &amp; SSE 스트리밍 지원
         </p>
       </footer>
     </main>

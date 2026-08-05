@@ -1,7 +1,29 @@
 import { useState, useCallback, useRef } from "react";
 
+export interface Citation {
+  id: number;
+  section_title: string;
+  page: number;
+  snippet: string;
+}
+
+export interface BlockItem {
+  text: string;
+  citations?: Citation[];
+}
+
+export interface UIBlock {
+  block_type: "CONTEXT" | "RETRIEVAL_RESULT" | "CAUTION" | "DELIVER";
+  title: string;
+  variant?: string;
+  content?: string;
+  items?: (string | BlockItem)[];
+}
+
 interface UseSSEReturn {
   data: string;
+  blocks: UIBlock[];
+  status: string;
   isLoading: boolean;
   isCompleted: boolean;
   error: string | null;
@@ -12,6 +34,8 @@ interface UseSSEReturn {
 
 export function useSSE(): UseSSEReturn {
   const [data, setData] = useState<string>("");
+  const [blocks, setBlocks] = useState<UIBlock[]>([]);
+  const [status, setStatus] = useState<string>("SUCCESS");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +53,8 @@ export function useSSE(): UseSSEReturn {
   const resetStream = useCallback(() => {
     stopStream();
     setData("");
+    setBlocks([]);
+    setStatus("SUCCESS");
     setError(null);
     setIsCompleted(false);
   }, [stopStream]);
@@ -59,20 +85,18 @@ export function useSSE(): UseSSEReturn {
             }
 
             const parsed = JSON.parse(event.data);
-            if (parsed.content) {
+            if (parsed.blocks && Array.isArray(parsed.blocks)) {
+              setBlocks(parsed.blocks);
+              if (parsed.status) setStatus(parsed.status);
+            } else if (parsed.content) {
               setData((prev) => prev + parsed.content);
-            } else if (typeof parsed === "string") {
-              setData((prev) => prev + parsed);
             }
           } catch {
-            // 일반 텍스트 스트림 처리
             setData((prev) => prev + event.data);
           }
         };
 
-        es.onerror = (err) => {
-          console.error("SSE Connection Error:", err);
-          // 스트림 정상 종료나 연결 에러 시 처리
+        es.onerror = () => {
           setIsCompleted(true);
           stopStream();
         };
@@ -86,6 +110,8 @@ export function useSSE(): UseSSEReturn {
 
   return {
     data,
+    blocks,
+    status,
     isLoading,
     isCompleted,
     error,
