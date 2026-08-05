@@ -1,9 +1,11 @@
 """
 [공용 헬퍼] test_rag_graph.py와 step_3.py가 공통으로 쓰는 함수 모음.
 - 인물(task_name)별 보험증권 마크다운(certificate.md) 로드
+- 인물(task_name)별 실제 가입 특약 allowlist(enrolled_sections.json) 로드
 - Supabase(pgvector) 벡터스토어 연결 및 인물별 데이터 삭제
 """
 import os
+import json
 from dotenv import load_dotenv
 from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_openai import OpenAIEmbeddings
@@ -28,6 +30,24 @@ def load_policy_md(task_name: str) -> str:
         return ""
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
+
+
+def get_enrolled_sections_path(task_name: str) -> str:
+    """인물별 실제 가입 특약 allowlist 경로. tasks/{task_name}/enrolled_sections.json"""
+    return os.path.join("tasks", task_name, "enrolled_sections.json")
+
+
+def get_enrolled_sections(task_name: str) -> list[str] | None:
+    """이 사람이 실제로 가입한 특약명(약관 section_title과 정확히 일치)의 allowlist를 로드합니다.
+    원본 약관 PDF는 상품 전체(32개 특약 등)를 담고 있어서, 이 목록으로 걸러주지 않으면
+    라우팅/검색이 '가입하지 않은 특약'까지 근거로 끌어와 답변에 섞어 쓰는 문제가 생깁니다.
+    파일이 없으면 None을 반환합니다 (allowlist 없이 이전처럼 전체 특약을 대상으로 동작)."""
+    path = get_enrolled_sections_path(task_name)
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("enrolled_sections")
 
 
 def get_supabase_client() -> Client:

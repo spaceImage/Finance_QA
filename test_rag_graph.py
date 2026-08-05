@@ -17,7 +17,7 @@ from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 
 from langgraph.graph import StateGraph, START, END
 
-from rag_common import get_embeddings, get_vectorstore, load_policy_md as _load_policy_md
+from rag_common import get_embeddings, get_vectorstore, load_policy_md as _load_policy_md, get_enrolled_sections
 
 # .env 파일 로드
 load_dotenv()
@@ -39,7 +39,12 @@ class AgentState(TypedDict):
 # 2. 보조 함수들 (약관 목록 및 증권 로드 등)
 # ==========================================
 def get_all_sections() -> List[str]:
-    """toc_config.csv에서 사용 가능한 모든 약관/특약 명칭을 추출합니다."""
+    """toc_config.csv에서 사용 가능한 특약 명칭을 추출합니다.
+    ⭐ 원본 약관 PDF는 이 상품이 판매하는 특약 전체(예: 32개)를 담고 있지만,
+    이 사람이 실제로 가입한 건 그중 일부뿐입니다. tasks/{TASK_NAME}/enrolled_sections.json에
+    가입 특약 allowlist가 있으면 그걸로 걸러서, 라우터가 '가입하지 않은 특약'을
+    후보로 고르는 일 자체가 원천적으로 불가능하도록 만듭니다 (allowlist 파일이 없으면
+    이전처럼 전체 특약을 대상으로 동작합니다)."""
     if not os.path.exists(CSV_PATH):
         return []
     sections = []
@@ -49,7 +54,13 @@ def get_all_sections() -> List[str]:
             title = row.get("section_title", "").strip()
             if title:
                 sections.append(title)
-    return list(set(sections))
+    all_sections = list(set(sections))
+
+    enrolled = get_enrolled_sections(TASK_NAME)
+    if enrolled:
+        allowed = set(enrolled)
+        return [s for s in all_sections if s in allowed]
+    return all_sections
 
 def load_policy_md() -> str:
     """개인 보험증권 정보 (tasks/{TASK_NAME}/certificate.md) 파일 내용을 로드합니다."""
@@ -302,6 +313,9 @@ def generate(state: AgentState) -> Dict[str, Any]:
 
 ⚠️ 답변 작성 규칙:
 1. 약관 참고 문서에는 지급 기준이 비율(%)로 나와 있는 경우가 많습니다. 이 경우, [개인 보험증권 정보]에서 해당 특약의 '보험가입금액'을 찾아 실제 지급될 구체적인 보험금 액수(예: 3,000만원의 30% = 900만원)를 직접 계산하여 답변에 명시해 주세요.
+   단, 계산에 쓰는 비율(%)이나 공제금액은 반드시 **지금 답변하려는 그 항목의 조항에 실제로 적힌 숫자**여야 합니다.
+   "실손보험은 보통 급여 90%를 보상한다"처럼 일반적인 보험 상식이나 다른 조항(예: 입원형)에서 본 숫자를
+   가져와 적용하지 마세요 — 해당 조항에 비율이 없으면(예: 공제금액만 빼고 한도까지 보상) 비율 없이 그대로 계산하세요.
 2. 각 청구 및 진단 시점에 약관상 면책 기간(예: 가입 후 90일 면책)이나 지급 한도(예: 1회 입원당 120일 한도) 등의 제약 사항이 걸려 있다면, 질문 상황과 비교하여 지급 가능 여부를 팩트체크하여 알려주세요.
 3. 정보의 출처(특약명 및 약관 페이지 번호, 개인 보험증권 등)를 반드시 답변에 명시해 주세요.
 4. [개인 보험증권 정보]는 이 고객이 가입한 특약의 '전체' 목록입니다(빠짐없이 다 나와 있음). 질문한 보장 항목이
