@@ -76,6 +76,34 @@
 ## 4. 지금 남아있는 3가지 RAG 방식은 그대로 유지
 `test_rag.py` / `test_search.py` / `test_rag_graph.py`는 서로 목적이 달라 셋 다 남겨뒀습니다 (각 파일 맨 위 주석에 어떤 용도인지 적어뒀습니다). 실제 서비스에 뭘 쓸지는 나중에 정하면 됩니다.
 
-## 5. 배포(Vercel) 전에 꼭 확인할 것
+## 5. LangGraph는 어디서, 어떻게 쓰였나
+
+**3개 RAG 스크립트 중 [test_rag_graph.py](test_rag_graph.py) 딱 하나에서만** 씁니다. `test_rag.py`, `test_search.py`는 LangGraph 없이 "검색 한 번 → LLM 한 번 호출"로 끝나는 단순 구조입니다.
+
+### 왜 필요했나
+단순 RAG는 "질문 그대로 벡터DB에 검색 → 나온 거 그대로 LLM에 넘김" 한 방향으로만 흐릅니다. 문제는:
+- 검색이 엉뚱한 특약에서 결과를 가져올 수 있고
+- 검색 결과가 질문과 관련 없을 수도 있고
+- 그래도 그냥 그걸로 답변을 만들어버립니다
+
+LangGraph는 이 흐름을 **"판단하면서 되돌아갈 수 있는" 상태 기계(그래프)**로 만들어서 이 문제를 보완합니다.
+
+### 실제 흐름 (`test_rag_graph.py` 안의 노드들)
+```
+route_question → retrieve → grade_documents ─┬─(문서 충분&관련있음)→ generate → 끝
+                     ↑                        ├─(관련 문서 없음, 재시도 가능)→ rewrite_query ─┘
+                     └───────────────────────┘
+                                              └─(재시도 다 했는데도 없음)→ fallback_generate → 끝
+```
+
+1. **`route_question`** — 질문("식중독으로 5일 입원하면 얼마 받아?")과 보험증권을 LLM에 보여주고 "이건 기초응급자금특약·재해치료비보장특약 관련이네"처럼 **관련 특약 이름을 먼저 골라내게** 합니다. (전체 300페이지 다 뒤지지 말고 관련 있는 데만 좁혀서 찾자는 의도)
+2. **`retrieve`** — 위에서 고른 특약으로 좁혀서 Supabase 벡터DB 검색 (`rag_common.py`의 `get_vectorstore()` 사용)
+3. **`grade_documents`** — 검색된 문서 하나하나를 LLM한테 "이거 질문이랑 관련 있어?"라고 다시 물어봐서 관련 없는 건 걸러냅니다
+4. **조건 분기(`decide_to_generate`)** — 걸러내고 남은 게 있으면 → `generate`(답변 작성)로, 하나도 없으면 → `rewrite_query`(질문을 검색하기 좋은 형태로 스스로 바꿔서) → 다시 `retrieve`로 되돌아감 (최대 1회 재시도), 그래도 없으면 → `fallback_generate`("못 찾았습니다" 안내)
+5. **`generate`** — 걸러진 문서 + 보험증권을 합쳐서, %로 되어있는 지급 기준을 실제 원화 금액으로 계산까지 해서 최종 답변 작성
+
+이 노드/분기 구조 자체를 파일 맨 아래(`workflow = StateGraph(...)` 부분, [test_rag_graph.py:338-372](test_rag_graph.py#L338-L372))에서 그래프로 조립하고 `app.compile()`로 실행 가능한 형태로 만듭니다. 나머지 두 스크립트보다 LLM 호출이 여러 번(라우팅 1회 + 문서 평가 N회 + 필요시 재작성 1회 + 최종답변 1회) 일어나는 대신, 엉뚱한 근거로 답변하는 걸 줄이는 게 목적입니다.
+
+## 6. 배포(Vercel) 전에 꼭 확인할 것
 - `.env`에 `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`가 들어있어야 합니다 (이 파일은 git에 올라가지 않습니다 — 실제 배포 시에는 Vercel 프로젝트의 "Environment Variables" 설정에 따로 넣어줘야 합니다).
 - 새 사람(더미 유저 포함)을 추가하려면: `tasks/{이름}/inputs/`에 PDF + 목차표를 넣고 `main.py`로 1~3단계 실행, 필요하면 `tasks/{이름}/certificate.md`도 작성하면 끝입니다.
