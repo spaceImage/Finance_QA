@@ -452,7 +452,8 @@ def run_agentic_rag(query: str):
     print("\n🔍 [참조된 최종 문서 목록]")
     for idx, doc in enumerate(final_state["documents"], 1):
         print(f" [{idx}] {doc.metadata.get('section_title', '약관')} (p.{doc.metadata.get('page', '?')})")
-        print(f"     내용 요약: {doc.page_content[:150].replace('\n', ' ')}...")
+        clean_text = doc.page_content[:150].replace("\n", " ")
+        print(f"     내용 요약: {clean_text}...")
     print("="*50)
 
 

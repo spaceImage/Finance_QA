@@ -6,6 +6,7 @@
 """
 import os
 import json
+from typing import List, Optional
 from dotenv import load_dotenv
 from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_openai import OpenAIEmbeddings
@@ -37,7 +38,7 @@ def get_enrolled_sections_path(task_name: str) -> str:
     return os.path.join("tasks", task_name, "enrolled_sections.json")
 
 
-def get_enrolled_sections(task_name: str) -> list[str] | None:
+def get_enrolled_sections(task_name: str) -> Optional[List[str]]:
     """이 사람이 실제로 가입한 특약명(약관 section_title과 정확히 일치)의 allowlist를 로드합니다.
     원본 약관 PDF는 상품 전체(32개 특약 등)를 담고 있어서, 이 목록으로 걸러주지 않으면
     라우팅/검색이 '가입하지 않은 특약'까지 근거로 끌어와 답변에 섞어 쓰는 문제가 생깁니다.
@@ -68,7 +69,7 @@ def get_embeddings() -> OpenAIEmbeddings:
     return OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
 
 
-def get_vectorstore(embeddings: OpenAIEmbeddings | None = None) -> SupabaseVectorStore:
+def get_vectorstore(embeddings: Optional[OpenAIEmbeddings] = None) -> SupabaseVectorStore:
     """task_name과 무관한 공용 documents 테이블에 연결된 벡터스토어.
     검색 시 반드시 filter={"task_name": ...} 를 넘겨서 인물별로 격리하세요."""
     embeddings = embeddings or get_embeddings()
