@@ -76,7 +76,7 @@ class InsuranceRAGEngine:
     async def route_question(self, state: AgentState) -> Dict[str, Any]:
         """
         [Router Node]
-        사용자의 질문과 개인 증권 정보를 기반으로, 약관 조회에 필요한 관련 특약들을 분류합니다.
+        사용자의 질문과 개인 증권 정보를 기반으로, 약관 조회에 필요한 관련 특약들을 분류하고 1단계 파라미터를 검증합니다.
         """
         print("🔮 [Router Node] 질문 분류 및 연관 특약 분석 중...")
         question = state["question"]
@@ -91,26 +91,7 @@ class InsuranceRAGEngine:
         )
         
         prompt = ChatPromptTemplate.from_messages([
-            ("system", """당신은 보험 약관 라우터입니다. 
-제공된 [개인 보험증권 정보]와 [사용자 질문]을 비교하여, 질문에 답변하기 위해 반드시 조회해야 하는 관련 약관/특약들의 이름을 후보 목록에서 선택하여 JSON 배열로 반환하세요.
-
-💡 매칭 규칙:
-- "식중독, 재해, 깁스, 응급" 등 재해/응급 치료 관련 질문은 '기초응급자금특약', '재해치료비보장특약', '입원특약' 등 관련 특약들을 모두 선택해야 합니다.
-- "갑상선암, 제자리암, 경계성종양, 소액암, 양성뇌종양" 등의 진단비(진단보험금)는 반드시 '리빙케어보장특약'을 선택해야 합니다.
-- "암, 소액암" 등의 입원/통원 치료비(치료급여금)를 묻는 질문은 '암치료비특약' 또는 '특정질병입원특약'을 선택해야 합니다.
-- "수술" 관련 질문은 '특정질병수술보장특약'이나 관련 수술 특약을 선택해야 합니다.
-- 일반적인 중대질병(CI) 진단이나 사망에 관한 질문은 주계약이나 'CI두번보장특약', '뉴CI보장특약' 등을 선택해야 합니다.
-
-[개인 보험증권 정보]
-{policy_md}
-
-후보 목록:
-{sections_list}
-
-응답은 반드시 아래 JSON 형식을 지켜주세요:
-{{
-  "selected_sections": ["특약명1", "특약명2"]
-}}"""),
+            ("system", ROUTER_SYSTEM_PROMPT),
             ("human", "질문: {question}")
         ])
         
@@ -121,8 +102,12 @@ class InsuranceRAGEngine:
                 "sections_list": json.dumps(all_sections, ensure_ascii=False),
                 "question": question
             })
+            
+            is_valid = response.get("is_valid", True)
+            missing_info = response.get("missing_info", "")
             selected = response.get("selected_sections", [])
-            print(f"🎯 라우터 분류 결과: {selected}")
+            print(f"🎯 라우터 파라미터 검증: is_valid={is_valid}, missing_info='{missing_info}'")
+            print(f"🎯 라우터 선택 특약: {selected}")
             
             matched_filters = []
             for sel in selected:
@@ -140,10 +125,15 @@ class InsuranceRAGEngine:
                             
             matched_filters = list(set(matched_filters))
             print(f"🎯 보정된 특약 필터 목록: {matched_filters}")
-            return {"section_filters": matched_filters, "loop_count": 0}
+            return {
+                "section_filters": matched_filters,
+                "is_valid": is_valid,
+                "missing_info": missing_info,
+                "loop_count": 0
+            }
         except Exception as e:
             print(f"⚠️ 라우터 오류 발생: {e}. 필터 없이 진행합니다.")
-            return {"section_filters": [], "loop_count": 0}
+            return {"section_filters": [], "is_valid": True, "missing_info": "", "loop_count": 0}
 
     async def retrieve(self, state: AgentState) -> Dict[str, Any]:
         """
