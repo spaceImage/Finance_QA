@@ -50,6 +50,8 @@
 
 ## 3. 시스템 아키텍처 다이어그램
 
+### 3-1. 지금 실제로 구현된 것 (현재 코드 기준)
+
 ```mermaid
 flowchart TB
     subgraph L1["1. 데이터 저장소 및 벡터DB 계층 (준비 단계)"]
@@ -107,6 +109,83 @@ flowchart TB
 
 - **점선(`-.->`)**: 벡터 검색이 아닌 방식으로 데이터가 흘러가는 경로 (예: `certificate.md`는 임베딩 안 되고 프롬프트에 그대로 주입, `benchmark.py`는 실시간 응답 흐름이 아니라 별도로 실행하는 오프라인 검증)
 - **`grade_documents` → `generate`/`rewrite_query`/`fallback_generate`**: 관련 문서가 있으면 바로 답변, 부족하면 질문을 스스로 바꿔서 1회 재검색, 그래도 없으면 안내 문구로 종료
+
+### 3-2. 목표 아키텍처 (상담사 보조도구 MVP, 계획 단계 — 아직 미구현)
+
+팀에서 논의된 "상담사 보조도구" 최종 그림을 축소한 MVP 설계입니다. **회색 점선 박스("개발 제외")는 지금 스코프에서 빠진 부분**이고, 파란색이 이번에 구현하기로 한 범위입니다. 아직 코드로는 하나도 없고, 3-1과 비교하며 봐야 합니다.
+
+```mermaid
+flowchart LR
+    subgraph S1["1단계: 입력 및 검증"]
+        direction TB
+        S1_IN["상담사 자연어 입력<br/>(+ 고객 증권 MD)"]
+        S1_GATE{"입력 / 거버넌스 검증"}
+        S1_LOOP["추가 정보 요청 (Loop)"]
+        S1_OK["LLM 분석 & 상담사 승인"]
+
+        S1_IN --> S1_GATE
+        S1_GATE -->|미충족/위반| S1_LOOP
+        S1_LOOP --> S1_IN
+        S1_GATE -->|검증 통과| S1_OK
+    end
+
+    subgraph S2["2단계: 작업 분할 (개발 제외)"]
+        direction TB
+        S2_SPLIT["작업 분할기 (Task Splitter)"]
+        S2_SSE["SSE 이벤트 전달<br/>(Task 카드 생성)"]
+        S2_SPLIT --> S2_SSE
+    end
+
+    subgraph S3["3단계: Task별 병렬 RAG & 연쇄 참조"]
+        direction TB
+        S3_EXTRACT["가입자 보장 정보 추출"]
+        S3_RAG["1차 약관 Vector DB RAG"]
+        S3_CHECK{"연쇄 참조 조항 존재?"}
+        S3_HOP["2차 Multi-hop 재검색 루프"]
+
+        S3_EXTRACT --> S3_RAG --> S3_CHECK
+        S3_CHECK -->|별표/참조 존재| S3_HOP
+        S3_HOP --> S3_RAG
+    end
+
+    subgraph S4["4단계: 검증 및 출력"]
+        direction TB
+        S4_AGG["Task별 결과 집계"]
+        S4_GUARD["LLM 가드레일 검증<br/>(개발 제외)"]
+        S4_OUT["웹페이지 대시보드 출력"]
+
+        S4_AGG --> S4_GUARD --> S4_OUT
+    end
+
+    DB[("상담 기록 & Audit Log DB<br/>(PostgreSQL / pgvector)")]
+
+    S1_OK --> S2
+    S2_SSE --> S3
+    S3_CHECK -->|참조 없음| S4
+    S4_AGG --> DB
+
+    S1 -.-> DB
+    S2 -.-> DB
+    S3 -.-> DB
+
+    classDef inScope fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:1.5px;
+    classDef excluded fill:#f1f5f9,stroke:#94a3b8,color:#64748b,stroke-width:1.5px,stroke-dasharray: 4 3;
+    classDef loopBox fill:#fee2e2,stroke:#dc2626,color:#7f1d1d,stroke-width:1.5px;
+    classDef gate fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:1.5px;
+    classDef store fill:#f3e8ff,stroke:#9333ea,color:#581c87,stroke-width:1.5px;
+
+    class S1_IN,S1_OK,S3_EXTRACT,S3_RAG,S3_HOP,S4_AGG,S4_OUT inScope;
+    class S2_SPLIT,S2_SSE,S4_GUARD excluded;
+    class S1_LOOP loopBox;
+    class S1_GATE,S3_CHECK gate;
+    class DB store;
+```
+
+- **1단계(입력/검증)**: 지금의 `route_question`+`certificate.md` 로드에 해당하지만, "거버넌스 검증"(타사 상품·의료진단 등 차단)과 "상담사 승인" 단계가 새로 추가된 개념입니다. 둘 다 지금 코드엔 없습니다.
+- **2단계(작업 분할)**: 통째로 "개발 제외" — 복합 질문을 여러 Task로 쪼개는 기능은 이번 MVP 범위에 아예 안 들어갑니다.
+- **3단계(Task별 RAG & 연쇄 참조)**: "1차 약관 Vector DB RAG"는 지금의 `retrieve`+`grade_documents`와 같은 개념입니다. **"2차 Multi-hop 재검색"은 새로운 기능**입니다 — 약관에 "(별표2) 참조"처럼 다른 조항을 가리키는 문구가 나오면, 지금은 그 참조를 따라가지 않는데 이걸 자동으로 쫓아가서 재검색하자는 아이디어입니다.
+- **4단계(검증/출력)**: "Task별 결과 집계"는 2단계(Task 분할)가 없으면 사실상 필요 없어지는 부분이라, 2단계를 안 하기로 하면 이 단계도 단순해질 수 있습니다. "LLM 가드레일 검증"은 실시간 버전인데, 지금은 `benchmark.py`로 오프라인으로만 하고 있어서 이것도 "개발 제외"로 표시돼 있습니다.
+- **DB**: 원래 다이어그램엔 "PostgreSQL / Redis"로 되어 있었는데, 저희는 Redis를 안 쓰기로 했으니 **pgvector로 통일**해서 표기했습니다 (지난 대화에서 정리한 내용).
 
 ---
 
