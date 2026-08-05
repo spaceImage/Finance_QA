@@ -1,6 +1,8 @@
-# [RAG 데모 ③: 고급 에이전트형(LangGraph)] 질문 -> 관련 특약 자동 분류(라우팅) -> 검색 ->
-# 검색결과 관련성 평가 -> (부족하면) 질문 재작성 후 재검색 -> 최종 답변, 순서로 동작하는
-# 멀티스텝 RAG. 셋 중 가장 정교하지만 그만큼 LLM 호출도 여러 번 일어납니다.
+# [메인 RAG 엔진 - LangGraph 에이전트형] 질문 -> 관련 특약 자동 분류(라우팅) -> 검색 ->
+# 검색결과 관련성 평가(병렬) -> (부족하면) 질문 재작성 후 재검색 -> 최종 답변, 순서로 동작하는
+# 멀티스텝 RAG. 이 프로젝트의 실제 질의응답을 담당하는 파일입니다.
+# - 터미널 확인용: run_agentic_rag(query)
+# - API/화면 연동용: run_agentic_rag_json(query) -> JSON 문자열 반환
 import os
 import json
 import csv
@@ -219,21 +221,29 @@ def grade_documents(state: AgentState) -> Dict[str, Any]:
     ])
     
     grader_chain = prompt | llm | JsonOutputParser()
-    
+
+    # ⭐ 문서를 하나씩 순차로(invoke) 평가하면 문서 수만큼 왕복 시간이 그대로 쌓여서
+    # (문서 10개 ≈ 15~20초) 응답이 느려집니다. .batch()로 동시에 보내면 문서 수와
+    # 거의 무관하게 왕복 1~2회 분량으로 끝납니다. max_concurrency로 동시 요청 수를 제한해
+    # OpenAI 레이트리밋에 과도하게 부딪히지 않도록 합니다.
+    batch_inputs = [{"document": doc.page_content, "question": question} for doc in documents]
+    results = grader_chain.batch(batch_inputs, config={"max_concurrency": 6}, return_exceptions=True)
+
     filtered_docs = []
-    for idx, doc in enumerate(documents, 1):
-        try:
-            res = grader_chain.invoke({"document": doc.page_content, "question": question})
-            score = res.get("binary_score", "no").strip().lower()
-            if score == "yes":
-                print(f"  [문서 {idx}] 관련성 있음 (유지) - 출처: {doc.metadata.get('section_title', '알 수 없음')}, p.{doc.metadata.get('page', '?')}")
-                filtered_docs.append(doc)
-            else:
-                print(f"  [문서 {idx}] 관련성 없음 (제외) - 출처: {doc.metadata.get('section_title', '알 수 없음')}, p.{doc.metadata.get('page', '?')}")
-        except Exception as e:
-            print(f"  [문서 {idx}] 평가 오류 ({e}) -> 기본 유지 처리")
+    for idx, (doc, res) in enumerate(zip(documents, results), 1):
+        title = doc.metadata.get('section_title', '알 수 없음')
+        page = doc.metadata.get('page', '?')
+        if isinstance(res, Exception):
+            print(f"  [문서 {idx}] 평가 오류 ({res}) -> 기본 유지 처리")
             filtered_docs.append(doc)
-            
+            continue
+        score = res.get("binary_score", "no").strip().lower()
+        if score == "yes":
+            print(f"  [문서 {idx}] 관련성 있음 (유지) - 출처: {title}, p.{page}")
+            filtered_docs.append(doc)
+        else:
+            print(f"  [문서 {idx}] 관련성 없음 (제외) - 출처: {title}, p.{page}")
+
     return {"documents": filtered_docs}
 
 
@@ -377,9 +387,9 @@ app = workflow.compile()
 # ==========================================
 # 6. 실행 및 테스트부
 # ==========================================
-def run_agentic_rag(query: str):
-    print(f"\n🚀 Agentic RAG 시작! 질문: '{query}'")
-    
+def _invoke_graph(query: str) -> Dict[str, Any]:
+    """그래프를 한 번 실행해서 최종 state(답변 + 참조 문서 등)를 반환하는 공용 내부 함수.
+    run_agentic_rag(터미널 출력용)와 run_agentic_rag_json(API/화면용 JSON) 둘 다 이걸 씁니다."""
     inputs = {
         "question": query,
         "section_filters": [],
@@ -387,20 +397,50 @@ def run_agentic_rag(query: str):
         "generation": "",
         "loop_count": 0
     }
-    
-    final_state = app.invoke(inputs)
-    
+    return app.invoke(inputs)
+
+
+def run_agentic_rag(query: str):
+    """[터미널용] 질문을 실행하고 사고 과정을 콘솔에 보기 좋게 출력합니다."""
+    print(f"\n🚀 Agentic RAG 시작! 질문: '{query}'")
+
+    final_state = _invoke_graph(query)
+
     print("\n" + "="*50)
     print("📊 [최종 답변 결과]")
     print("="*50)
     print(final_state["generation"])
     print("="*50)
-    
+
     print("\n🔍 [참조된 최종 문서 목록]")
     for idx, doc in enumerate(final_state["documents"], 1):
         print(f" [{idx}] {doc.metadata.get('section_title', '약관')} (p.{doc.metadata.get('page', '?')})")
         print(f"     내용 요약: {doc.page_content[:150].replace('\n', ' ')}...")
     print("="*50)
+
+
+def run_agentic_rag_json(query: str) -> str:
+    """[API/화면용] 질문을 실행하고, 답변 + 참조 페이지 전문을 test_search.py와 같은 형태의
+    JSON 문자열로 반환합니다. 웹 프론트엔드나 API 라우트에서 이 함수를 호출하면 됩니다."""
+    final_state = _invoke_graph(query)
+
+    referenced_pages = [
+        {
+            "section_title": doc.metadata.get("section_title"),
+            "page_number": doc.metadata.get("page"),
+            "source_pdf": doc.metadata.get("source_pdf"),
+            "full_content": doc.page_content,
+        }
+        for doc in final_state.get("documents", [])
+    ]
+
+    output_data = {
+        "query": query,
+        "answer": final_state.get("generation", ""),
+        "total_referenced_count": len(referenced_pages),
+        "referenced_pages": referenced_pages,
+    }
+    return json.dumps(output_data, ensure_ascii=False, indent=2)
 
 if __name__ == "__main__":
     test_queries = [

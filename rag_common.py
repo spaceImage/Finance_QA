@@ -1,6 +1,5 @@
 """
-[공용 헬퍼] 여러 RAG 스크립트(test_rag.py, test_search.py, test_rag_graph.py)와
-step_3.py가 공통으로 쓰는 함수 모음.
+[공용 헬퍼] test_rag_graph.py와 step_3.py가 공통으로 쓰는 함수 모음.
 - 인물(task_name)별 보험증권 마크다운(certificate.md) 로드
 - Supabase(pgvector) 벡터스토어 연결 및 인물별 데이터 삭제
 """

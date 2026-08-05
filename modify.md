@@ -12,7 +12,7 @@
 
 크게 두 단계로 나뉩니다.
 - **[준비 단계]** 사람 한 명당 약관 PDF + 보험증권을 넣으면, AI가 "검색해서 찾아 읽을 수 있는" 형태(벡터DB)로 미리 변환해둡니다. (아래 2번 `step_1~3.py`)
-- **[질문 단계]** 사용자가 질문을 하면, 미리 만들어둔 벡터DB에서 관련 조항을 찾아와 AI가 답변을 만듭니다. (아래 2번 `test_*.py`)
+- **[질문 단계]** 사용자가 질문을 하면, 미리 만들어둔 벡터DB에서 관련 조항을 찾아와 AI가 답변을 만듭니다. (아래 2번 `test_rag_graph.py`)
 
 ---
 
@@ -30,12 +30,11 @@
 | [db/schema.sql](db/schema.sql) | Supabase(클라우드 DB)에 딱 한 번 실행해서 "벡터를 저장할 테이블"과 "유사도 검색 함수"를 만들어두는 설정 파일. |
 | [requirements.txt](requirements.txt) | 이 프로그램을 돌리는 데 필요한 파이썬 부품(라이브러리) 목록. `pip install -r requirements.txt`로 한 번에 설치. |
 
-### 질문 단계 — 실제로 질문에 답하는 3가지 방식
+### 질문 단계 — 실제로 질문에 답하는 엔진
 | 파일 | 역할 (쉬운 설명) |
 |---|---|
-| [test_rag.py](test_rag.py) | 가장 단순한 버전. 질문 → 벡터DB 검색 → "생각 과정 + 답변 + 출처"가 담긴 사람이 읽기 좋은 텍스트로 답변. |
-| [test_search.py](test_search.py) | 답변을 화면용 텍스트가 아니라 **JSON**(질문/답변/참조페이지 등)으로 돌려줍니다. 나중에 웹/앱 화면과 연결할 때 쓰기 좋은 형태. |
-| [test_rag_graph.py](test_rag_graph.py) | 가장 정교한 버전. "이 질문은 어떤 특약이랑 관련 있지?"부터 자동으로 판단하고, 검색 결과가 부실하면 질문을 스스로 바꿔서 재검색까지 하는 다단계 AI. |
+| [test_rag_graph.py](test_rag_graph.py) | 이 프로젝트의 유일한 질의응답 엔진. "이 질문은 어떤 특약이랑 관련 있지?"부터 자동으로 판단하고, 검색 결과가 부실하면 질문을 스스로 바꿔서 재검색까지 하는 다단계(LangGraph) AI. 용도별로 함수가 두 개 있습니다: `run_agentic_rag(query)`는 터미널에 사람이 읽기 좋게 출력하고, `run_agentic_rag_json(query)`는 웹/앱 화면이나 API에 바로 꽂을 수 있는 JSON 문자열을 반환합니다. |
+| [benchmark.py](benchmark.py) | 미리 정해둔 검증 질문들을 실제로 돌려보고, 답변이 근거 문서에 진짜 기반했는지(hallucination 없는지) LLM으로 이중 검증해서 PASS/FAIL 리포트를 만드는 회귀 테스트 스크립트. |
 
 ### 사람별 데이터 (`tasks/{이름}/`, `pdf_policy/`, `pdf_certificate/`)
 | 위치 | 역할 |
@@ -73,12 +72,14 @@
 
 ---
 
-## 4. 지금 남아있는 3가지 RAG 방식은 그대로 유지
-`test_rag.py` / `test_search.py` / `test_rag_graph.py`는 서로 목적이 달라 셋 다 남겨뒀습니다 (각 파일 맨 위 주석에 어떤 용도인지 적어뒀습니다). 실제 서비스에 뭘 쓸지는 나중에 정하면 됩니다.
+## 4. RAG 방식을 3개 → 1개로 정리
+원래 `test_rag.py`(단순 텍스트 답변) / `test_search.py`(단순 JSON 답변) / `test_rag_graph.py`(LangGraph 고급 버전) 세 개가 있었는데, 벤치마크로 [test_rag_graph.py](test_rag_graph.py)의 정확도를 확인한 뒤 이걸로 최종 결정했습니다.
+- `test_rag.py`는 `test_rag_graph.py`가 기능을 완전히 포함하는 상위호환이라 그냥 삭제.
+- `test_search.py`는 삭제하기 전에, 걔가 갖고 있던 **JSON 응답 형태**만 `test_rag_graph.py`에 `run_agentic_rag_json()` 함수로 옮겨 담고 나서 삭제했습니다. (터미널 확인용 `run_agentic_rag()`은 그대로 유지)
 
 ## 5. LangGraph는 어디서, 어떻게 쓰였나
 
-**3개 RAG 스크립트 중 [test_rag_graph.py](test_rag_graph.py) 딱 하나에서만** 씁니다. `test_rag.py`, `test_search.py`는 LangGraph 없이 "검색 한 번 → LLM 한 번 호출"로 끝나는 단순 구조입니다.
+이 프로젝트의 유일한 RAG 엔진인 [test_rag_graph.py](test_rag_graph.py) 전체가 LangGraph로 만들어져 있습니다. (전에는 단순 버전 2개와 비교하는 맥락이었는데, 지금은 이거 하나만 남았습니다.)
 
 ### 왜 필요했나
 단순 RAG는 "질문 그대로 벡터DB에 검색 → 나온 거 그대로 LLM에 넘김" 한 방향으로만 흐릅니다. 문제는:
@@ -104,6 +105,17 @@ route_question → retrieve → grade_documents ─┬─(문서 충분&관련�
 
 이 노드/분기 구조 자체를 파일 맨 아래(`workflow = StateGraph(...)` 부분, [test_rag_graph.py:338-372](test_rag_graph.py#L338-L372))에서 그래프로 조립하고 `app.compile()`로 실행 가능한 형태로 만듭니다. 나머지 두 스크립트보다 LLM 호출이 여러 번(라우팅 1회 + 문서 평가 N회 + 필요시 재작성 1회 + 최종답변 1회) 일어나는 대신, 엉뚱한 근거로 답변하는 걸 줄이는 게 목적입니다.
 
-## 6. 배포(Vercel) 전에 꼭 확인할 것
+## 6. 벤치마크로 찾은 실제 오류 2개 + 속도 개선
+
+[benchmark.py](benchmark.py)로 장석찬님 약관 기준 정답을 미리 아는 검증 질문 10개를 돌려서, 답변이 실제로 근거 문서/증권에 기반했는지(hallucination 없는지) LLM으로 이중 검증했습니다.
+
+- **찾은 오류 ①**: "갑상선암 진단 시 보장금액?" 질문에 AI가 "가입금액의 30%"라고 답했는데, 실제 증권에는 "초기 갑상선암 10%, 이후 다른 갑상선암 20%"로 되어 있음 — 비율을 잘못 인용.
+- **찾은 오류 ②**: "암 치료 10일 입원 시 입원비?" 질문에 AI가 장석찬님이 가입하지도 않은 "암치료비특약"을 있다고 착각해서, 실제 가입한 특약 보험금에 중복으로 더해 **2배로 부풀려 답변**함.
+- 이 둘은 아직 코드로 고치지 않은 **알려진 이슈**입니다. (원인 조사 및 프롬프트 보완은 다음 작업으로 남아있음)
+
+**속도 개선**: `grade_documents` 노드가 검색된 문서를 한 개씩 순서대로 LLM에 물어보던 걸(문서 10개면 15~20초) `.batch()`로 동시에 평가하도록 고쳤습니다. 단독 질문 기준 최대 27초 걸리던 응답이 7~9초대로 줄었습니다.
+(참고: 벤치마크처럼 질문 10개를 쉬지 않고 연달아 쏘면 OpenAI 사용량 한도 때문에 다시 느려질 수 있지만, 실제 서비스처럼 한 사람이 순차적으로 질문하는 상황에서는 해당되지 않습니다.)
+
+## 7. 배포(Vercel) 전에 꼭 확인할 것
 - `.env`에 `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`가 들어있어야 합니다 (이 파일은 git에 올라가지 않습니다 — 실제 배포 시에는 Vercel 프로젝트의 "Environment Variables" 설정에 따로 넣어줘야 합니다).
 - 새 사람(더미 유저 포함)을 추가하려면: `tasks/{이름}/inputs/`에 PDF + 목차표를 넣고 `main.py`로 1~3단계 실행, 필요하면 `tasks/{이름}/certificate.md`도 작성하면 끝입니다.
