@@ -47,7 +47,69 @@
 
 ---
 
-## 3. 오늘 발견하고 고친 문제들
+## 3. 시스템 아키텍처 다이어그램
+
+```mermaid
+flowchart TB
+    subgraph L1["1. 데이터 저장소 및 벡터DB 계층 (준비 단계)"]
+        direction TB
+        PDF["raw_policy.pdf<br/>(삼성생명 약관, 308p)"]
+        S1["step_1.py<br/>PyMuPDF 텍스트 추출<br/>+ toc_config.csv 기준 특약별 분할"]
+        S2["step_2.py<br/>특약별 JSON → 1개 합본 JSON"]
+        S3["step_3.py<br/>페이지 단위 청킹(296개) + 400자 오버랩<br/>text-embedding-3-small"]
+        VDB[("Supabase pgvector<br/>documents 테이블<br/>(task_name='jang'으로 격리)")]
+        CERT["tasks/jang/certificate.md<br/>(고객 보험증권 가입내역·보장금액)"]
+
+        PDF --> S1 --> S2 --> S3 --> VDB
+    end
+
+    subgraph L3["2. LangGraph Agentic RAG 파이프라인 (test_rag_graph.py)"]
+        direction TB
+        N1["route_question<br/>질문+증권 보고 관련 특약 분류(라우팅)"]
+        N2["retrieve<br/>Supabase 유사도 검색<br/>(task_name + section_title 필터)"]
+        N3["grade_documents<br/>검색 문서 관련성 평가 (병렬 .batch)"]
+        DEC{"decide_to_generate<br/>관련 문서 있음?"}
+        N4["generate<br/>certificate.md + 약관 문서로<br/>답변 생성 (스트리밍)"]
+        N5["rewrite_query<br/>질문 재작성 (최대 1회)"]
+        N6["fallback_generate<br/>재시도 초과 시 안내 답변"]
+
+        N1 --> N2 --> N3 --> DEC
+        DEC -->|"문서 충분"| N4
+        DEC -->|"문서 부족 (1회차)"| N5
+        DEC -->|"재시도 초과"| N6
+        N5 --> N2
+    end
+
+    subgraph L2["3. 사용자 요청 계층"]
+        direction TB
+        CLI["run_agentic_rag(query)<br/>터미널용, 스트리밍 출력"]
+        API["run_agentic_rag_json(query)<br/>API/화면용, JSON 반환"]
+    end
+
+    subgraph L4["4. 오프라인 검증 (실시간 흐름과 분리됨)"]
+        BENCH["benchmark.py<br/>고정 질문 10개 실행 +<br/>별도 LLM judge로 grounding 재검증<br/>(PASS/FAIL 리포트)"]
+    end
+
+    CLI -->|"질문 입력"| N1
+    API -->|"질문 입력"| N1
+    VDB -.->|"유사도 검색"| N2
+    CERT -.->|"policy_md 로 주입"| N4
+    N4 -->|"답변 반환"| CLI
+    N4 -->|"답변 반환"| API
+    N6 -->|"답변 반환"| CLI
+    N6 -->|"답변 반환"| API
+    N4 -.->|"결과 실행 후 검증"| BENCH
+
+    style VDB fill:#fff3cd,stroke:#d9a441
+    style DEC fill:#f8f9fa,stroke:#666
+```
+
+- **점선(`-.->`)**: 벡터 검색이 아닌 방식으로 데이터가 흘러가는 경로 (예: `certificate.md`는 임베딩 안 되고 프롬프트에 그대로 주입, `benchmark.py`는 실시간 응답 흐름이 아니라 별도로 실행하는 오프라인 검증)
+- **`grade_documents` → `generate`/`rewrite_query`/`fallback_generate`**: 관련 문서가 있으면 바로 답변, 부족하면 질문을 스스로 바꿔서 1회 재검색, 그래도 없으면 안내 문구로 종료
+
+---
+
+## 4. 오늘 발견하고 고친 문제들
 
 ### 🔴 문제 1: 약관 본문이 사실상 통째로 사라지고 있었음 (가장 심각)
 - **증상**: 장석찬님 약관 296페이지를 확인해보니, 실제 조항 내용은 하나도 없고 페이지 번호(`- 231 -` 같은)만 저장되어 있었습니다. 즉 지금까지 만든 벡터DB는 "빈 껍데기"에 가까웠습니다.
@@ -72,12 +134,12 @@
 
 ---
 
-## 4. RAG 방식을 3개 → 1개로 정리
+## 5. RAG 방식을 3개 → 1개로 정리
 원래 `test_rag.py`(단순 텍스트 답변) / `test_search.py`(단순 JSON 답변) / `test_rag_graph.py`(LangGraph 고급 버전) 세 개가 있었는데, 벤치마크로 [test_rag_graph.py](test_rag_graph.py)의 정확도를 확인한 뒤 이걸로 최종 결정했습니다.
 - `test_rag.py`는 `test_rag_graph.py`가 기능을 완전히 포함하는 상위호환이라 그냥 삭제.
 - `test_search.py`는 삭제하기 전에, 걔가 갖고 있던 **JSON 응답 형태**만 `test_rag_graph.py`에 `run_agentic_rag_json()` 함수로 옮겨 담고 나서 삭제했습니다. (터미널 확인용 `run_agentic_rag()`은 그대로 유지)
 
-## 5. LangGraph는 어디서, 어떻게 쓰였나
+## 6. LangGraph는 어디서, 어떻게 쓰였나
 
 이 프로젝트의 유일한 RAG 엔진인 [test_rag_graph.py](test_rag_graph.py) 전체가 LangGraph로 만들어져 있습니다. (전에는 단순 버전 2개와 비교하는 맥락이었는데, 지금은 이거 하나만 남았습니다.)
 
@@ -105,7 +167,7 @@ route_question → retrieve → grade_documents ─┬─(문서 충분&관련�
 
 이 노드/분기 구조 자체를 파일 맨 아래(`workflow = StateGraph(...)` 부분, [test_rag_graph.py:338-372](test_rag_graph.py#L338-L372))에서 그래프로 조립하고 `app.compile()`로 실행 가능한 형태로 만듭니다. 나머지 두 스크립트보다 LLM 호출이 여러 번(라우팅 1회 + 문서 평가 N회 + 필요시 재작성 1회 + 최종답변 1회) 일어나는 대신, 엉뚱한 근거로 답변하는 걸 줄이는 게 목적입니다.
 
-## 6. 벤치마크/실사용 테스트로 찾은 실제 오류 3개
+## 7. 벤치마크/실사용 테스트로 찾은 실제 오류 3개
 
 [benchmark.py](benchmark.py)로 장석찬님 약관 기준 정답을 미리 아는 검증 질문 10개를 돌려서, 답변이 실제로 근거 문서/증권에 기반했는지(hallucination 없는지) LLM으로 이중 검증했습니다.
 
@@ -114,7 +176,7 @@ route_question → retrieve → grade_documents ─┬─(문서 충분&관련�
 - **찾은 오류 ③ (직접 테스트 중 발견)**: "장염으로 내과 가서 수액 맞았는데 10만원 나왔다" 질문에 AI가 실손의료비 **통원(외래)** 보상을 계산하면서, **입원** 조항에만 있는 "90%" 공제 비율을 잘못 가져다 써서 실제보다 적게 계산함(정확히는 공제금액만 빼고 거의 전액 보상되는데, 거기에 불필요하게 90%를 한 번 더 곱함).
 - 세 건 모두 "여러 조항의 숫자가 섞여 들어왔을 때 헷갈려서 잘못된 숫자를 가져다 쓰는" 같은 패턴입니다. 아직 코드로 고치지 않은 **알려진 이슈**입니다. (원인 조사 및 프롬프트 보완은 다음 작업으로 남아있음)
 
-## 7. 응답 속도 개선 (실제 계산 시간 ↓ + 체감 대기시간 ↓)
+## 8. 응답 속도 개선 (실제 계산 시간 ↓ + 체감 대기시간 ↓)
 
 문서 많이 검색되는 질문은 최대 27초까지 걸렸는데, 원인을 나눠서 각각 손봤습니다.
 
@@ -129,7 +191,7 @@ route_question → retrieve → grade_documents ─┬─(문서 충분&관련�
 - `python test_rag_graph.py "질문내용"` → 질문 하나 바로 실행
 - `python test_rag_graph.py --demo` → 예전처럼 데모 질문 7개 한꺼번에 실행
 
-## 8. Supabase DB 구조 정리 — 안 쓰는 테이블 삭제
+## 9. Supabase DB 구조 정리 — 안 쓰는 테이블 삭제
 
 Supabase 프로젝트를 열어보니, 제가 만든 `documents`(벡터DB) 테이블 말고 **`user` / `plan` / `user_contract` 테이블이 이미 존재**하고 있었습니다 (김철수·이영희·박민수 같은 더미 이름과 KB/LIG 보험상품 데이터가 실제로 들어있었음 — 아마 다른 작업자가 미리 설계해둔 "정식 유저 DB" 스캐폴딩으로 보입니다).
 
@@ -137,6 +199,6 @@ Supabase 프로젝트를 열어보니, 제가 만든 `documents`(벡터DB) 테�
 - **조치**: 지금 미니프로젝트 스코프(챗봇이 다루는 데이터 = 보험약관/증권 벡터DB 하나뿐, 로그인/회원 개념 없음)에 맞춰 `user`, `plan`, `user_contract` 3개 테이블을 전부 삭제했습니다.
 - **결과**: Supabase `public` 스키마에 이제 **`documents` 테이블 하나만** 남았습니다 (296행, 장석찬님 데이터 그대로 유지). `db/schema.sql`도 원래부터 `documents`/`match_documents`만 정의하고 있어서, 이제 실제 DB 상태와 스키마 파일이 정확히 일치합니다.
 
-## 9. 배포(Vercel) 전에 꼭 확인할 것
+## 10. 배포(Vercel) 전에 꼭 확인할 것
 - `.env`에 `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`가 들어있어야 합니다 (이 파일은 git에 올라가지 않습니다 — 실제 배포 시에는 Vercel 프로젝트의 "Environment Variables" 설정에 따로 넣어줘야 합니다).
 - 새 사람(더미 유저 포함)을 추가하려면: `tasks/{이름}/inputs/`에 PDF + 목차표를 넣고 `main.py`로 1~3단계 실행, 필요하면 `tasks/{이름}/certificate.md`도 작성하면 끝입니다.
