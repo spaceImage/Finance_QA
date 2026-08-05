@@ -1,3 +1,5 @@
+# [메인 실행 파일] 터미널 메뉴로 사람(task) 등록 -> PDF 파싱 -> JSON 병합 -> 벡터DB 적재까지
+# step_1/2/3.py를 순서대로 실행해주는 대화형 CLI. 실제로 실행하는 진입점은 이 파일입니다.
 import os
 import sys
 from step_1 import run_step_1

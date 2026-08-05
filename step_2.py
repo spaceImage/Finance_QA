@@ -1,3 +1,5 @@
+# [2단계: JSON 병합] step_1이 특약별로 쪼개 놓은 parsed_json_parts/*.json 파일들을
+# 사람 한 명 기준 final_output/{task_name}_final.json 하나로 합칩니다.
 import os
 import json
 

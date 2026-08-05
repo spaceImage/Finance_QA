@@ -1,9 +1,12 @@
+# [3단계: 임베딩/벡터DB 적재] final_output JSON을 페이지 단위 청크로 쪼개 OpenAI로 임베딩한 뒤,
+# Supabase(pgvector)의 documents 테이블에 저장합니다. 재실행해도 중복 적재되지 않도록
+# 저장 전에 이 인물(task_name)의 기존 벡터를 먼저 지웁니다.
 import os
 import json
 from dotenv import load_dotenv
 from langchain_core.documents import Document
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.vectorstores import Chroma
+from rag_common import get_embeddings, get_supabase_client, clear_task_documents, DOCUMENTS_TABLE, MATCH_FUNCTION
+from langchain_community.vectorstores import SupabaseVectorStore
 
 # .env 로드
 load_dotenv()
@@ -11,13 +14,18 @@ load_dotenv()
 def run_step_3(task_folder_name: str, overlap_chars: int = 400):
     task_dir = os.path.join("tasks", task_folder_name)
     final_json_path = os.path.join(task_dir, "final_output", f"{task_folder_name}_final.json")
-    vector_db_dir = os.path.join(task_dir, "vector_db")
 
     # API 키 검증
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         print("\n❌ [오류] OPENAI_API_KEY를 찾을 수 없습니다.")
         print("👉 프로젝트 최상위 경로의 '.env' 파일에 OPENAI_API_KEY를 설정해주세요.")
+        return
+
+    # Supabase 접속 정보 검증
+    if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
+        print("\n❌ [오류] SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY를 찾을 수 없습니다.")
+        print("👉 '.env' 파일에 Supabase 프로젝트 정보를 설정해주세요. (supabase/schema.sql 먼저 실행 필요)")
         return
 
     # 최종 JSON 검증
@@ -60,7 +68,9 @@ def run_step_3(task_folder_name: str, overlap_chars: int = 400):
 
             text_to_embed = f"{header}\n{overlap_prefix}{page_text}"
 
-            # LangChain Document 객체 생성 (Metadata에도 피보험자 제외)
+            # LangChain Document 객체 생성
+            # task_name을 메타데이터에 넣어 Supabase의 공용 documents 테이블에서
+            # 인물별로 격리 검색(filter={"task_name": ...})할 수 있게 합니다.
             doc = Document(
                 page_content=text_to_embed,
                 metadata={
@@ -76,21 +86,25 @@ def run_step_3(task_folder_name: str, overlap_chars: int = 400):
     print(f"📦 총 {len(documents)}개 페이지 청크 준비 완료 (Overlap: {overlap_chars}자 적용).")
     print("🌐 OpenAI 'text-embedding-3-small' 모델로 임베딩 진행 중...")
 
-    # OpenAI 임베딩 생성
-    embeddings = OpenAIEmbeddings(
-        model="text-embedding-3-small",
-        openai_api_key=api_key
-    )
+    embeddings = get_embeddings()
+    supabase_client = get_supabase_client()
 
-    # Chroma DB 저장
-    vectorstore = Chroma.from_documents(
+    # ⭐ 재실행 시 기존 벡터가 중복/누적되지 않도록 이 인물(task_name)의 기존 행을 지우고 재적재 (idempotent rebuild)
+    print(f"🧹 기존 '{task_folder_name}' 벡터 삭제 중 (Supabase documents 테이블)...")
+    clear_task_documents(task_folder_name)
+
+    # Supabase(pgvector) 저장
+    SupabaseVectorStore.from_documents(
         documents=documents,
         embedding=embeddings,
-        persist_directory=vector_db_dir
+        client=supabase_client,
+        table_name=DOCUMENTS_TABLE,
+        query_name=MATCH_FUNCTION,
+        chunk_size=500,
     )
 
-    print(f"\n🎉 [step_3 완료] Vector DB 구축 성공!")
-    print(f"🗄️ Vector DB 위치: {os.path.abspath(vector_db_dir)}")
+    print(f"\n🎉 [step_3 완료] Vector DB(Supabase pgvector) 구축 성공!")
+    print(f"🗄️ 테이블: {DOCUMENTS_TABLE} (task_name='{task_folder_name}')")
 
 if __name__ == "__main__":
     task_name = input("진행할 작업명을 입력하세요 (예: jang): ").strip()
