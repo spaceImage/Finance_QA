@@ -88,7 +88,7 @@ def clear_task_documents(task_name: str) -> None:
     client.table(DOCUMENTS_TABLE).delete().eq("metadata->>task_name", task_name).execute()
 
 
-def create_session(task_name: str, counselor_id: str | None = None, metadata: dict | None = None) -> str | None:
+def create_session(task_name: str, counselor_id: Optional[str] = None, metadata: Optional[dict] = None) -> Optional[str]:
     """새로운 상담 세션을 sessions 테이블에 생성하고 session_id (uuid string)를 반환합니다."""
     try:
         client = get_supabase_client()
@@ -102,6 +102,36 @@ def create_session(task_name: str, counselor_id: str | None = None, metadata: di
     except Exception as e:
         print(f"⚠️ session 생성 중 오류 발생: {e}")
     return None
+
+
+def get_session_state(session_id: str) -> Optional[dict]:
+    """session_id로 세션 정보 및 대화/슬롯 상태를 조회합니다."""
+    try:
+        client = get_supabase_client()
+        res = client.table("sessions").select("*").eq("id", session_id).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0]
+    except Exception as e:
+        print(f"⚠️ session 조회 오류: {e}")
+    return None
+
+
+def update_session_state(session_id: str, metadata_updates: dict) -> bool:
+    """세션 metadata에 새로운 대화 상태나 슬롯 데이터를 누적 저장합니다."""
+    try:
+        client = get_supabase_client()
+        current = get_session_state(session_id)
+        current_meta = current.get("metadata", {}) if current else {}
+        updated_meta = {**current_meta, **metadata_updates}
+        
+        res = client.table("sessions").update({
+            "metadata": updated_meta
+        }).eq("id", session_id).execute()
+        return bool(res.data)
+    except Exception as e:
+        print(f"⚠️ session 업데이트 오류: {e}")
+        return False
+
 
 
 def save_audit_log(

@@ -1,13 +1,15 @@
 import os
 import json
 import asyncio
-from typing import AsyncGenerator
-from fastapi import FastAPI, Query
+from typing import AsyncGenerator, Optional
+from pydantic import BaseModel
+from fastapi import FastAPI, Query, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-# main 브랜치 최신 Agentic RAG 파이프라인 연동
+# main 브랜치 최신 Agentic RAG 파이프라인 연동 및 세션 헬퍼
 from test_rag_graph import run_agentic_rag_json
+from rag_common import create_session, get_session_state, update_session_state
 
 app = FastAPI(title="Finance QA Agentic RAG SSE Server")
 
@@ -20,9 +22,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class CreateSessionRequest(BaseModel):
+    task_name: str = "jang"
+    counselor_id: Optional[str] = None
+    metadata: Optional[dict] = None
+
 @app.get("/")
 def read_root():
     return {"message": "Finance QA Agentic RAG SSE Server is running!"}
+
+@app.post("/api/v1/session/create")
+def api_create_session(req: CreateSessionRequest):
+    """신규 대화 세션을 생성하고 session_id를 반환합니다."""
+    session_id = create_session(
+        task_name=req.task_name,
+        counselor_id=req.counselor_id,
+        metadata=req.metadata or {}
+    )
+    if not session_id:
+        raise HTTPException(status_code=500, detail="세션 생성에 실패했습니다.")
+    return {
+        "status": "success",
+        "session_id": session_id,
+        "task_name": req.task_name
+    }
+
+@app.get("/api/v1/session/{session_id}")
+def api_get_session(session_id: str):
+    """세션 상태 및 대화 히스토리를 조회합니다."""
+    session_info = get_session_state(session_id)
+    if not session_info:
+        raise HTTPException(status_code=404, detail="해당 세션을 찾을 수 없습니다.")
+    return {
+        "status": "success",
+        "session": session_info
+    }
+
 
 async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]:
     """
@@ -56,7 +91,8 @@ async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]
 @app.get("/api/rag/stream")
 async def rag_stream(
     query: str = Query(..., description="사용자 질문"),
-    task_name: str = Query("jang", description="작업명 (기본: jang)")
+    task_name: str = Query("jang", description="작업명 (기본: jang)"),
+    session_id: Optional[str] = Query(None, description="대화 세션 ID (선택)")
 ):
     return StreamingResponse(
         sse_generator(query, task_name),
