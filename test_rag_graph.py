@@ -497,6 +497,29 @@ class InsuranceRAGEngine:
                             "data": chunk.content
                         }
 
+    def run_json(self, query: str) -> str:
+        """단일 질문에 대해 invoke 후 JSON 문자열을 반환하는 헬퍼 함수."""
+        final_state = self.invoke(query)
+        referenced_pages = [
+            {
+                "section_title": doc.metadata.get("section_title"),
+                "page_number": doc.metadata.get("page"),
+                "source_pdf": doc.metadata.get("source_pdf"),
+                "full_content": doc.page_content,
+            }
+            for doc in final_state.get("documents", [])
+        ]
+        output_data = {
+            "query": query,
+            "status": "NEED_MORE_INFO" if final_state.get("is_valid") is False else "SUCCESS",
+            "answer": final_state.get("generation", ""),
+            "blocks": final_state.get("blocks") or [],
+            "total_referenced_count": len(referenced_pages),
+            "referenced_pages": referenced_pages,
+        }
+        return json.dumps(output_data, ensure_ascii=False, indent=2)
+
+
 
 # ==========================================
 # 6. 하위 호환성용 전역 호출 함수 및 CLI 모드
