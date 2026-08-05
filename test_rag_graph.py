@@ -4,6 +4,7 @@
 # - 터미널 확인용: run_agentic_rag(query)
 # - API/화면 연동용: run_agentic_rag_json(query) -> JSON 문자열 반환
 import os
+import sys
 import json
 import csv
 from typing import List, Dict, Any, Literal, TypedDict
@@ -316,8 +317,19 @@ def generate(state: AgentState) -> Dict[str, Any]:
 """
     
     try:
-        response = llm.invoke(prompt)
-        return {"generation": response.content}
+        # ⭐ invoke() 대신 stream()을 써서, 답변 전체가 완성될 때까지 기다리지 않고
+        # 토큰이 만들어지는 대로 곧바로 터미널에 출력합니다. 실제 계산/응답 시간은 동일하지만
+        # 사용자가 "멈춰있다"고 느끼는 대기 체감 시간이 크게 줄어듭니다.
+        print("\n" + "="*50)
+        print("📊 [최종 답변 결과]")
+        print("="*50)
+        full_text = ""
+        for chunk in llm.stream(prompt):
+            piece = chunk.content or ""
+            print(piece, end="", flush=True)
+            full_text += piece
+        print("\n" + "="*50)
+        return {"generation": full_text}
     except Exception as e:
         print(f"⚠️ 답변 생성 오류: {e}")
         return {"generation": f"오류로 인해 답변을 생성하지 못했습니다: {e}"}
@@ -342,7 +354,14 @@ def decide_to_generate(state: AgentState) -> Literal["generate", "rewrite_query"
 
 def fallback_generate(state: AgentState) -> Dict[str, Any]:
     print("🥀 [Fallback Node] 연관 정보를 찾지 못하여 기본 안내 답변 생성 중...")
-    return {"generation": "죄송합니다. 제공해주신 보험 약관에서 해당 질문에 대한 구체적인 지급 기준이나 보장 금액 관련 정보를 찾지 못했습니다. 질문 내용을 조금 더 구체적으로 변경하여 검색해 보시는 것을 권장합니다."}
+    message = "죄송합니다. 제공해주신 보험 약관에서 해당 질문에 대한 구체적인 지급 기준이나 보장 금액 관련 정보를 찾지 못했습니다. 질문 내용을 조금 더 구체적으로 변경하여 검색해 보시는 것을 권장합니다."
+    # generate 노드는 답변을 스트리밍하면서 직접 출력하므로, 이 노드도 동일하게 여기서 바로 출력해줍니다.
+    print("\n" + "="*50)
+    print("📊 [최종 답변 결과]")
+    print("="*50)
+    print(message)
+    print("="*50)
+    return {"generation": message}
 
 # ==========================================
 # 5. LangGraph 워크플로우 조립
@@ -401,16 +420,12 @@ def _invoke_graph(query: str) -> Dict[str, Any]:
 
 
 def run_agentic_rag(query: str):
-    """[터미널용] 질문을 실행하고 사고 과정을 콘솔에 보기 좋게 출력합니다."""
+    """[터미널용] 질문을 실행하고 사고 과정을 콘솔에 보기 좋게 출력합니다.
+    최종 답변 자체는 generate/fallback_generate 노드가 만들어지는 대로(스트리밍) 이미
+    출력하므로, 여기서는 다시 출력하지 않고 참조 문서 목록만 덧붙입니다."""
     print(f"\n🚀 Agentic RAG 시작! 질문: '{query}'")
 
     final_state = _invoke_graph(query)
-
-    print("\n" + "="*50)
-    print("📊 [최종 답변 결과]")
-    print("="*50)
-    print(final_state["generation"])
-    print("="*50)
 
     print("\n🔍 [참조된 최종 문서 목록]")
     for idx, doc in enumerate(final_state["documents"], 1):
@@ -442,19 +457,37 @@ def run_agentic_rag_json(query: str) -> str:
     }
     return json.dumps(output_data, ensure_ascii=False, indent=2)
 
+DEMO_QUERIES = [
+    "장석찬님이 식중독으로 5일간 입원한 경우 지급받을 수 있는 총 보험금은 얼마인가요?",
+    "장석찬님이 보험 가입 후 50일째 되는 날에 위암 확정 진단을 받았습니다. 암 보장을 받을 수 있나요?",
+    "암 치료를 목적으로 병원에 150일 동안 장기 입원한 경우, 암입원급여금은 며칠 분까지 지급되나요?",
+    "갑상선암이 아닌 초기 갑상선암으로 진단받은 경우 진단비는 얼마인가요?",
+    "뇌졸중으로 수술을 받았는데 관혈 수술과 비관혈(내시경) 수술의 보험금 차이가 어떻게 되나요?",
+    "약관에서 규정하는 '대장점막내암'의 정의는 무엇인가요?",
+    "대장점막내암 진단 시 얼마를 지급받나요?"
+]
+
 if __name__ == "__main__":
-    test_queries = [
-        "장석찬님이 식중독으로 5일간 입원한 경우 지급받을 수 있는 총 보험금은 얼마인가요?",
-        "장석찬님이 보험 가입 후 50일째 되는 날에 위암 확정 진단을 받았습니다. 암 보장을 받을 수 있나요?",
-        "암 치료를 목적으로 병원에 150일 동안 장기 입원한 경우, 암입원급여금은 며칠 분까지 지급되나요?",
-        "갑상선암이 아닌 초기 갑상선암으로 진단받은 경우 진단비는 얼마인가요?",
-        "뇌졸중으로 수술을 받았는데 관혈 수술과 비관혈(내시경) 수술의 보험금 차이가 어떻게 되나요?",
-        "약관에서 규정하는 '대장점막내암'의 정의는 무엇인가요?",
-        "대장점막내암 진단 시 얼마를 지급받나요?"
-    ]
-    
-    for idx, query in enumerate(test_queries, 1):
-        print("\n" + "="*80)
-        print(f"📝 [테스트 {idx}] {query}")
-        print("="*80)
-        run_agentic_rag(query)
+    # 1) 명령줄 인자로 질문을 바로 넘긴 경우: python test_rag_graph.py "질문내용"
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--demo":
+            for idx, query in enumerate(DEMO_QUERIES, 1):
+                print("\n" + "="*80)
+                print(f"📝 [테스트 {idx}] {query}")
+                print("="*80)
+                run_agentic_rag(query)
+        else:
+            run_agentic_rag(" ".join(sys.argv[1:]))
+    # 2) 인자 없이 실행한 경우: 터미널에서 계속 질문을 입력받는 대화형 모드
+    else:
+        try:
+            while True:
+                user_query = input("\n💬 질문을 입력하세요 (종료하려면 'exit' 또는 'q' 입력): ").strip()
+                if not user_query:
+                    continue
+                if user_query.lower() in ["exit", "q", "종료"]:
+                    print("👋 프로그램을 종료합니다.")
+                    break
+                run_agentic_rag(user_query)
+        except KeyboardInterrupt:
+            print("\n👋 프로그램을 종료합니다.")
