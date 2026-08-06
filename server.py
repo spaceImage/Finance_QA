@@ -82,7 +82,7 @@ def api_get_policy_pdf(task_name: str = "jang"):
     return FileResponse(
         matches[0],
         media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename*=UTF-8''{safe_name}"}
+        headers={"Content-Disposition": 'inline; filename="policy.pdf"'}
     )
 
 @app.get("/api/v1/session/{session_id}")
@@ -137,33 +137,45 @@ async def api_slot_fill(req: SlotFillRequest):
 
 
 
-async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]:
+async def sse_generator(query: str, task_name: str, confirm: bool = False) -> AsyncGenerator[str, None]:
     """
     RAG 파이프라인 결과를 SSE(Server-Sent Events) 프로토콜 데이터로 스트리밍 전송합니다.
+    confirm=False일 때는 1차 조사 계획(task_plan) 수립 후 AWAITING_CONFIRMATION 상태로 멈춥니다.
+    confirm=True일 때 비로소 약관 DB 깊은 조사 및 최종 보상 답변 생성을 진행합니다.
     """
     try:
-        # 1. 파이프라인 단계 및 프로그레스 이벤트 전송
-        yield f"data: {json.dumps({'step': 1, 'label': '🔮 1단계: 질문 라우팅 및 필수 파라미터 검증 중...', 'progress': 25}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.05)
+        yield f"data: {json.dumps({'step': 1, 'label': '🔮 1단계: 상담 정보 및 입력 팩트 확인 중...', 'progress': 15}, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(0.01)
 
-        yield f"data: {json.dumps({'step': 2, 'label': '🔍 2단계: Supabase 약관 DB 유사도 검색 중...', 'progress': 50}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.05)
-
-        # 비동기 스레드 풀에서 RAG 파이프라인 구동
         loop = asyncio.get_event_loop()
-        result_json_str = await loop.run_in_executor(
-            None, run_agentic_rag_json, query
-        )
-        
+
+        if not confirm:
+            # HITL Phase 1: 1차 조사 계획 수립 및 일시 정지 (AWAITING_CONFIRMATION)
+            result_json_str = await loop.run_in_executor(
+                None, run_initial_plan_json, query, task_name
+            )
+        else:
+            # HITL Phase 2: 상담사 승인 후 깊은 약관 DB 조사 및 답변 생성
+            result_json_str = await loop.run_in_executor(
+                None, run_agentic_rag_json, query, task_name
+            )
+
         result_data = json.loads(result_json_str)
         answer_text = result_data.get("answer", "")
+        blocks = result_data.get("blocks", [])
 
-        yield f"data: {json.dumps({'step': 3, 'label': '📊 3단계: 약관 조항 관련성 검증 및 추론 완료', 'progress': 75}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.05)
+        status = result_data.get("status", "SUCCESS")
 
-        yield f"data: {json.dumps({'step': 4, 'label': '✍️ 4단계: 손해사정 보상 산출 및 UI 블록 생성 중...', 'progress': 90}, ensure_ascii=False)}\n\n"
+        if status == "AWAITING_CONFIRMATION":
+            yield f"data: {json.dumps({'step': 1, 'label': '📋 1차 조사 계획 수립 완료 (상담사 승인 대기 중)', 'progress': 30}, ensure_ascii=False)}\n\n"
+        elif "답변할 수 없습니다" in answer_text or status == "OUT_OF_SCOPE":
+            yield f"data: {json.dumps({'step': 1, 'label': '🛡️ 검증 완료 (거부)', 'progress': 100}, ensure_ascii=False)}\n\n"
+        else:
+            yield f"data: {json.dumps({'step': 2, 'label': '✍️ 약관 DB 조사 및 답변 생성 완료', 'progress': 100}, ensure_ascii=False)}\n\n"
 
-        # 2. 텍스트 스트리밍 지원 (기존 useSSE 호환)
+        await asyncio.sleep(0.01)
+
+        # 2. 텍스트 스트리밍 전송
         chunk_size = 5
         for i in range(0, len(answer_text), chunk_size):
             chunk = answer_text[i:i+chunk_size]
@@ -171,11 +183,14 @@ async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]
             yield f"data: {payload}\n\n"
             await asyncio.sleep(0.01)
 
-        # 2. 최종 구조화 UI Block payload 및 메타데이터 전송
+        # 3. 최종 구조화 UI Block payload 및 메타데이터 전송
         final_payload = json.dumps({
-            "status": result_data.get("status", "SUCCESS"),
+            "status": status,
+            "task_classification": result_data.get("task_classification", []),
+            "task_plan": result_data.get("task_plan", []),
             "answer": answer_text,
-            "blocks": result_data.get("blocks", []),
+            "consultation_summary": result_data.get("consultation_summary", ""),
+            "blocks": blocks,
             "total_referenced_count": result_data.get("total_referenced_count", 0),
             "referenced_pages": result_data.get("referenced_pages", [])
         }, ensure_ascii=False)
@@ -183,7 +198,6 @@ async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]
 
         # SSE 완료 신호
         yield "data: [DONE]\n\n"
-
 
     except Exception as e:
         error_payload = json.dumps({"error": str(e)}, ensure_ascii=False)
@@ -193,10 +207,11 @@ async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]
 async def rag_stream(
     query: str = Query(..., description="사용자 질문"),
     task_name: str = Query("jang", description="작업명 (기본: jang)"),
+    confirm: bool = Query(False, description="상담사 조사 승인 여부"),
     session_id: Optional[str] = Query(None, description="대화 세션 ID (선택)")
 ):
     return StreamingResponse(
-        sse_generator(query, task_name),
+        sse_generator(query, task_name, confirm=confirm),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
