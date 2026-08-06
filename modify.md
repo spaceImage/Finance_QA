@@ -54,7 +54,7 @@
 flowchart TB
     subgraph L1["1. 데이터 저장소 및 벡터DB 계층 (준비 단계)"]
         direction TB
-        PDF["raw_policy.pdf<br/>(삼성생명 약관, 308p)"]
+        PDF["raw_policy.pdf<br/>(AIQ 약관, 308p)"]
         S1["step_1.py<br/>PyMuPDF 텍스트 추출<br/>+ toc_config.csv 기준 특약별 분할"]
         S2["step_2.py<br/>특약별 JSON → 1개 합본 JSON"]
         S3["step_3.py<br/>페이지 단위 청킹(296개) + 400자 오버랩<br/>text-embedding-3-small"]

@@ -7,7 +7,7 @@ const PRESET_QUERIES = [
   { label: "✅ 재해골절 보상금 (정상 RAG)", query: "재해골절 시 얼마 나오나요?" },
   { label: "✅ 암 진단비 문의 (정상 RAG)", query: "갑상선암 진단 시 보장 금액은?" },
   { label: "✅ Multi-hop 복합 질의 (정상 RAG)", query: "대장점막내암 진단 후 10일 입원 시 보상금은?" },
-  { label: "🚫 지원 범위 밖 질문 (Out-of-Scope 차단)", query: "삼성생명은 왜 보험료가 비싼가요?" },
+  { label: "🚫 지원 범위 밖 질문 (Out-of-Scope 차단)", query: "AIQ는 왜 보험료가 비싼가요?" },
 ];
 
 export default function DebugPage() {

@@ -1,6 +1,6 @@
 # 📄 Finance QA: 보험약관 Agentic RAG 손해사정 상담 지원 시스템
 
-PDF 보험약관을 목차(TOC) 기준으로 파싱해 JSON으로 구조화하고, **Supabase(pgvector) Vector DB**에 적재한 뒤, **LangGraph 기반 Agentic Orchestration Workflow**로 보험금 문의에 답변하는 시스템입니다. **FastAPI SSE 서버**가 답변을 실시간 스트리밍하고, **Next.js 프론트엔드**가 삼성생명 CS/CX 인바운드 상담사용 화면을 제공합니다.
+PDF 보험약관을 목차(TOC) 기준으로 파싱해 JSON으로 구조화하고, **Supabase(pgvector) Vector DB**에 적재한 뒤, **LangGraph 기반 Agentic Orchestration Workflow**로 보험금 문의에 답변하는 시스템입니다. **FastAPI SSE 서버**가 답변을 실시간 스트리밍하고, **Next.js 프론트엔드**가 AIQ CS/CX 인바운드 상담사용 화면을 제공합니다.
 
 > 📌 개발 배경(발견한 버그, 아키텍처 결정 이유)은 [modify.md](modify.md)에, Agentic Orchestration Workflow v2.0의 상세 명세(Node별 역할·모델 전략·API 응답 스키마)는 [AGENT.MD](AGENT.MD)에 정리되어 있습니다. 두 문서 모두 작성 시점이 서로 다른 개발 단계라 세부 흐름은 최신 코드(`test_rag_graph.py`) 기준으로 이 README를 우선 참고하세요.
 

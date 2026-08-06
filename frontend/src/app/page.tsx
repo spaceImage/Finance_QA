@@ -1,7 +1,19 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import dynamic from "next/dynamic";
 import { useSSE, UIBlock, Citation, NodeLog } from "@/hooks/useSSE";
+
+// pdf.js는 브라우저 전용(canvas/DOMMatrix) API에 의존하므로, 서버 사이드 프리렌더 시
+// 빌드가 깨지지 않도록 클라이언트에서만 동적으로 로드합니다.
+const PdfHighlightViewer = dynamic(() => import("@/components/PdfHighlightViewer"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-full flex items-center justify-center text-xs text-slate-400 font-semibold animate-pulse">
+      PDF 뷰어를 불러오는 중입니다...
+    </div>
+  ),
+});
 
 interface CustomerProfile {
   name: string;
@@ -13,8 +25,8 @@ interface CustomerProfile {
 
 const DEFAULT_CUSTOMER: CustomerProfile = {
   name: "장석찬",
-  policyNo: "SAMSUNG-2024-99812",
-  policyName: "삼성생명 (무)재해치료비보장특약",
+  policyNo: "AIQ-2024-99812",
+  policyName: "AIQ (무)재해치료비보장특약",
   birthDate: "1997.11.11.",
   phone: "010-0000-0000",
 };
@@ -422,7 +434,7 @@ export default function Home() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-sm font-extrabold bg-gradient-to-r from-blue-700 via-indigo-700 to-indigo-900 bg-clip-text text-transparent">
-                  삼성생명 AI 손해사정 보상 가이드 시스템
+                  AIQ 손해사정 보상 가이드 시스템
                 </h1>
                 <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 border border-indigo-200 text-[10px] font-mono font-bold rounded-full">
                   LangGraph v2.0
@@ -509,7 +521,7 @@ export default function Home() {
                 "재해골절 시 얼마 나오나요?",
                 "갑상선암 진단 시 보장 금액은?",
                 "대장점막내암 진단 후 10일 입원 시 보상금은?",
-                "삼성생명은 왜 보험료가 비싼가요?",
+                "AIQ는 왜 보험료가 비싼가요?",
               ].map((q, idx) => (
                 <button
                   key={idx}
@@ -796,6 +808,80 @@ export default function Home() {
           </form>
         </section>
       </div>
+
+      {/* 증권 MD 보기 모달 */}
+      {showPolicyModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4"
+          onClick={() => setShowPolicyModal(false)}
+        >
+          <div
+            className="w-full max-w-3xl h-[85vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 shrink-0">
+              <span className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                <span>📋</span> {activeCustomer.name}님 보험증권 요약 (증권 MD)
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowPolicyModal(false)}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5">
+              {isPolicyLoading ? (
+                <div className="h-full flex items-center justify-center text-xs text-slate-400 font-semibold animate-pulse">
+                  보험증권 정보를 불러오는 중입니다...
+                </div>
+              ) : policyContent ? (
+                <div className="text-xs text-slate-800 leading-relaxed space-y-2">
+                  {renderFormattedMarkdown(policyContent)}
+                </div>
+              ) : (
+                <div className="h-full flex items-center justify-center text-xs text-rose-500 font-semibold">
+                  보험증권 정보를 불러오지 못했습니다. 백엔드 서버(/api/v1/policy/jang)가 실행 중인지 확인해주세요.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 약관 PDF 보기 모달 */}
+      {showPdfModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4"
+          onClick={() => setShowPdfModal(false)}
+        >
+          <div
+            className="w-full max-w-4xl h-[88vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 shrink-0">
+              <span className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                <span>📄</span> {activeCustomer.policyName} 약관 원문
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowPdfModal(false)}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 min-h-0">
+              <PdfHighlightViewer
+                pdfUrl={`${baseUrl}/api/v1/policy-pdf/jang`}
+                initialPage={1}
+                onClose={() => setShowPdfModal(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

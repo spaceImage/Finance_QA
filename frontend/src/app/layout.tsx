@@ -14,7 +14,7 @@ const notoKra = Noto_Sans_KR({
 });
 
 export const metadata: Metadata = {
-  title: "삼성생명 CS/CX 인바운드 상담 지원 시스템",
+  title: "AIQ CS/CX 인바운드 상담 지원 시스템",
   description: "AIQ 손해사정 보상금 산출 및 약관 분석 시스템",
 };
 
