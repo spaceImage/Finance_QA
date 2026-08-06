@@ -56,14 +56,23 @@ Finance_QA/
 ### 1. 가상환경 생성 및 의존성 설치
 
 ```bash
-# 가상환경 생성 및 활성화
+# 가상환경 생성
 python -m venv .venv
-source .venv/bin/activate  # macOS / Linux
-# .venv\Scripts\activate   # Windows
+
+# 활성화 - macOS / Linux
+source .venv/bin/activate
+
+# 활성화 - Windows (PowerShell)
+.\.venv\Scripts\Activate.ps1
+
+# 활성화 - Windows (cmd.exe)
+.venv\Scripts\activate.bat
 
 # 필요한 패키지 설치
 pip install -r backend/requirements.txt
 ```
+
+> PowerShell에서 `Activate.ps1` 실행이 "이 시스템에서 스크립트를 실행할 수 없습니다"로 막히면, 실행 정책이 기본값(Restricted)이기 때문입니다. 관리자 권한 없이 현재 사용자 범위에서만 풀려면: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
 ### 2. 환경변수 설정 (`.env`)
 
