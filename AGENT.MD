@@ -648,6 +648,9 @@ models:
    - `grade_documents` 노드에서 LLM 관련성 평가 시 문서가 0개로 전면 드랍되어 5단계(`multi_hop_reasoning`)를 건너뛰고 100% 완결로 건너뛰던 에지 케이스 규명 및 안전 보존 처리 완료
    - `page.tsx` 내 `useEffect`에서 `text` 속성에 임시 문구(`"고객 약관 데이터베이스 탐색..."`)를 오염 할당하던 코드를 전면 삭제하여 텍스트가 덮어씌워지던 버그를 완벽 해결 완료
 
+37. **Git 작업 트리 및 파이프라인 전체 파일 `p3/jsc` 독립 브랜치 신규 푸시 완료**:
+   - main 브랜치를 건드리지 않는 엄격한 지침에 따라, 현재 완성된 작업 트리 전체(AGENT.MD, config.py, test_rag_graph.py, prompts.py, server.py, page.tsx 등)를 **`p3/jsc` 전용 브랜치**로 직접 커밋 후 원격 저장소(`origin/p3/jsc`)에 성공적으로 푸시 완수
+
 ---
 
 # API 응답 결과 명세 및 데이터 샘플 (Backend & Frontend Spec)

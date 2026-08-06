@@ -148,32 +148,6 @@ async def api_approve_task_plan(req: TaskApprovalRequest):
     사용자가 Task Planner가 수립한 세부 작업 계획을 확인하고 승인(Human-in-the-Loop Interrupt Resume)했을 때
     랭그래프 파이프라인을 재개하여 RAG 검색 및 손해사정 추론을 계속 실행합니다.
     """
-<<<<<<< Updated upstream
-    try:
-        # 1. 파이프라인 단계 및 프로그레스 이벤트 전송
-        yield f"data: {json.dumps({'step': 1, 'label': '🔮 1단계: 질문 라우팅 및 필수 파라미터 검증 중...', 'progress': 25}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.05)
-
-        yield f"data: {json.dumps({'step': 2, 'label': '🔍 2단계: Supabase 약관 DB 유사도 검색 중...', 'progress': 50}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.05)
-
-        # 비동기 스레드 풀에서 RAG 파이프라인 구동
-        loop = asyncio.get_event_loop()
-        result_json_str = await loop.run_in_executor(
-            None, run_agentic_rag_json, query
-        )
-        
-        result_data = json.loads(result_json_str)
-        answer_text = result_data.get("answer", "")
-
-        yield f"data: {json.dumps({'step': 3, 'label': '📊 3단계: 약관 조항 관련성 검증 및 추론 완료', 'progress': 75}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.05)
-
-        yield f"data: {json.dumps({'step': 4, 'label': '✍️ 4단계: 손해사정 보상 산출 및 UI 블록 생성 중...', 'progress': 90}, ensure_ascii=False)}\n\n"
-
-        # 2. 텍스트 스트리밍 지원 (기존 useSSE 호환)
-        chunk_size = 5
-=======
     session_info = get_session_state(req.session_id)
     if not session_info:
         raise HTTPException(status_code=404, detail="해당 세션을 찾을 수 없습니다.")
@@ -318,9 +292,6 @@ async def sse_generator(query: str, task_name: str, session_id: Optional[str] = 
         }, ensure_ascii=False)
         yield f"data: {final_payload}\n\n"
 
-<<<<<<< Updated upstream
-        # SSE 완료 신호
-=======
         # 4. 세션 대화 맥락 및 Audit Log 자동 기록 (대화 기억 윈도우)
         if session_id:
             chat_history = current_meta.get("chat_history", [])
@@ -350,7 +321,6 @@ async def sse_generator(query: str, task_name: str, session_id: Optional[str] = 
             execution_time_ms=execution_time_ms
         )
 
->>>>>>> Stashed changes
         yield "data: [DONE]\n\n"
 
 
