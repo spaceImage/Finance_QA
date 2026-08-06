@@ -8,3 +8,6 @@ langchain-openai>=0.1.0
 openai>=1.30.0
 langgraph
 supabase>=2.4.0
+fastapi>=0.110.0
+uvicorn>=0.29.0
+watchfiles>=0.21.0
