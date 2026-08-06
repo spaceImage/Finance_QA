@@ -7,9 +7,9 @@ from fastapi import FastAPI, Query, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 
-# main 브랜치 최신 Agentic RAG 파이프라인 연동 및 세션/감사로그 헬퍼
+# main 브랜치 최신 Agentic RAG 파이프라인 연동 및 세션 헬퍼
 from test_rag_graph import run_agentic_rag_json
-from rag_common import create_session, get_session_state, update_session_state, load_policy_md, save_audit_log, get_session_audit_logs
+from rag_common import create_session, get_session_state, update_session_state, load_policy_md
 
 app = FastAPI(title="Finance QA Agentic RAG SSE Server")
 
@@ -53,17 +53,6 @@ class SlotFillRequest(BaseModel):
     slot_value: str
     task_name: Optional[str] = "jang"
 
-@app.get("/api/v1/session/{session_id}/logs")
-def api_get_session_logs(session_id: str):
-    """특정 세션의 감사 로그(Audit Logs) 전체 이력을 반환합니다."""
-    logs = get_session_audit_logs(session_id)
-    return {
-        "status": "success",
-        "session_id": session_id,
-        "total_count": len(logs),
-        "logs": logs
-    }
-
 @app.get("/api/v1/policy/{task_name}")
 def api_get_policy(task_name: str = "jang"):
     """고객의 보험증권(certificate.md) 원문 텍스트를 반환합니다."""
@@ -93,7 +82,7 @@ def api_get_policy_pdf(task_name: str = "jang"):
     return FileResponse(
         matches[0],
         media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename*=UTF-8''{safe_name}"}
+        headers={"Content-Disposition": 'inline; filename="policy.pdf"'}
     )
 
 @app.get("/api/v1/session/{session_id}")
@@ -138,16 +127,6 @@ async def api_slot_fill(req: SlotFillRequest):
     )
     result_data = json.loads(result_json_str)
 
-    # 4. Audit Log 기록
-    save_audit_log(
-        session_id=req.session_id,
-        step_name="SLOT_FILL",
-        status="SUCCESS",
-        input_payload={"slot_key": req.slot_key, "slot_value": req.slot_value},
-        output_payload={"answer_summary": result_data.get("answer", "")[:200]},
-        execution_time_ms=0
-    )
-
     return {
         "status": "success",
         "session_id": req.session_id,
@@ -156,73 +135,73 @@ async def api_slot_fill(req: SlotFillRequest):
         "result": result_data
     }
 
-
-
-async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]:
+async def sse_generator(query: str, task_name: str, confirm: bool = True) -> AsyncGenerator[str, None]:
     """
-    RAG 파이프라인 결과를 SSE(Server-Sent Events) 프로토콜 데이터로 스트리밍 전송합니다.
+    MVP 원스톱 RAG 파이프라인:
+    중간 멈춤 없이 1단계 특약 라우팅 ➔ 2단계 약관 DB 정밀 검색 및 보상 산출 ➔ UI 블록 & 각주 전송
     """
-async def sse_generator(query: str, task_name: str, session_id: Optional[str] = None) -> AsyncGenerator[str, None]:
-    """
-    RAG 파이프라인 결과를 SSE(Server-Sent Events) 프로토콜 데이터로 스트리밍 전송하고 감사 로그를 기록합니다.
-    """
-    start_time = asyncio.get_event_loop().time()
     try:
+        # Step 1: 라우팅 & 입력 팩트 확인
+        yield f"data: {json.dumps({'step': 1, 'label': '🔮 1단계: 상담 정보 및 특약 라우팅 확인 중...', 'progress': 25}, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(0.05)
+
+        # Step 2: 약관 DB 정밀 검색
+        yield f"data: {json.dumps({'step': 2, 'label': '📚 2단계: 약관 DB 정밀 검색 및 보상 분석 중...', 'progress': 65}, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(0.05)
+
         loop = asyncio.get_event_loop()
         result_json_str = await loop.run_in_executor(
-            None, run_agentic_rag_json, query
+            None, run_agentic_rag_json, query, task_name
         )
-        
+
         result_data = json.loads(result_json_str)
         answer_text = result_data.get("answer", "")
+        blocks = result_data.get("blocks", [])
+        status = result_data.get("status", "SUCCESS")
 
-        # 1. 글자 단위 스트리밍 전송 (chunk 단위)
+        yield f"data: {json.dumps({'step': 3, 'label': '✍️ 3단계: 보상 산출 결과 및 UI 블록 카드 생성 완료', 'progress': 100}, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(0.05)
+
+        # 2. 텍스트 스트리밍 전송 (chunk 단위)
         chunk_size = 5
         for i in range(0, len(answer_text), chunk_size):
             chunk = answer_text[i:i+chunk_size]
             payload = json.dumps({"content": chunk}, ensure_ascii=False)
             yield f"data: {payload}\n\n"
+            await asyncio.sleep(0.01)
 
-        # 2. 최종 구조화 UI Block payload 및 메타데이터 전송
+        # 3. 최종 구조화 UI Block payload 및 메타데이터 전송
         final_payload = json.dumps({
-            "status": result_data.get("status", "SUCCESS"),
+            "status": status,
+            "task_classification": result_data.get("task_classification", []),
+            "task_plan": result_data.get("task_plan", []),
             "answer": answer_text,
-            "blocks": result_data.get("blocks", []),
+            "consultation_summary": result_data.get("consultation_summary", ""),
+            "blocks": blocks,
             "total_referenced_count": result_data.get("total_referenced_count", 0),
             "referenced_pages": result_data.get("referenced_pages", [])
         }, ensure_ascii=False)
         yield f"data: {final_payload}\n\n"
 
-        # 3. Audit Log 자동 기록 (DB)
-        execution_time_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
-        if session_id:
-            save_audit_log(
-                session_id=session_id,
-                step_name="RAG_STREAM",
-                status="SUCCESS",
-                input_payload={"query": query, "task_name": task_name},
-                output_payload={
-                    "answer_summary": answer_text[:200],
-                    "referenced_count": result_data.get("total_referenced_count", 0)
-                },
-                execution_time_ms=execution_time_ms
-            )
-
         # SSE 완료 신호
         yield "data: [DONE]\n\n"
 
     except Exception as e:
-        error_payload = json.dumps({"error": str(e)}, ensure_ascii=False)
-        yield f"data: {error_payload}\n\n"
+        error_msg = f"서버 오류 발생: {str(e)}"
+        yield f"data: {json.dumps({'error': error_msg}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
 
 @app.get("/api/rag/stream")
+@app.get("/api/stream_agentic_rag")
+@app.get("/api/v1/chat/stream")
 async def rag_stream(
     query: str = Query(..., description="사용자 질문"),
     task_name: str = Query("jang", description="작업명 (기본: jang)"),
+    confirm: bool = Query(False, description="상담사 조사 승인 여부"),
     session_id: Optional[str] = Query(None, description="대화 세션 ID (선택)")
 ):
     return StreamingResponse(
-        sse_generator(query, task_name, session_id),
+        sse_generator(query, task_name, confirm=confirm),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -30,12 +30,16 @@ load_dotenv()
 class AgentState(TypedDict):
     question: str
     section_filters: List[str]
+    task_classification: Optional[List[str]]
+    task_plan: Optional[List[str]]
+    is_out_of_scope: Optional[bool]
     documents: List[Document]
     generation: str
     loop_count: int
     is_valid: Optional[bool]
     missing_info: Optional[str]
     blocks: Optional[List[Dict[str, Any]]]
+    consultation_summary: Optional[str]
     missing_slots: Optional[List[str]]
     slot_values: Optional[Dict[str, Any]]
     slot_prompt: Optional[str]
@@ -86,7 +90,7 @@ class InsuranceRAGEngine:
         policy_md = self.load_policy_md()
         
         llm = ChatOpenAI(
-            model="gpt-5-mini", 
+            model="gpt-4o-mini", 
             temperature=0, 
             openai_api_key=self.openai_api_key,
             model_kwargs={"response_format": {"type": "json_object"}}
@@ -105,10 +109,13 @@ class InsuranceRAGEngine:
                 "question": question
             })
             
+            is_out_of_scope = response.get("is_out_of_scope", False)
             is_valid = response.get("is_valid", True)
             missing_info = response.get("missing_info", "")
             selected = response.get("selected_sections", [])
-            print(f"🎯 라우터 파라미터 검증: is_valid={is_valid}, missing_info='{missing_info}'")
+            task_plan = response.get("task_plan", [])
+            print(f"🎯 라우터 파라미터 검증: is_out_of_scope={is_out_of_scope}, is_valid={is_valid}, missing_info='{missing_info}'")
+            print(f"🎯 라우터 입력 팩트 기반 조사 계획: {task_plan}")
             print(f"🎯 라우터 선택 특약: {selected}")
             
             matched_filters = []
@@ -129,13 +136,16 @@ class InsuranceRAGEngine:
             print(f"🎯 보정된 특약 필터 목록: {matched_filters}")
             return {
                 "section_filters": matched_filters,
+                "task_classification": matched_filters if matched_filters else selected,
+                "task_plan": task_plan,
+                "is_out_of_scope": is_out_of_scope,
                 "is_valid": is_valid,
                 "missing_info": missing_info,
                 "loop_count": 0
             }
         except Exception as e:
             print(f"⚠️ 라우터 오류 발생: {e}. 필터 없이 진행합니다.")
-            return {"section_filters": [], "is_valid": True, "missing_info": "", "loop_count": 0}
+            return {"section_filters": [], "task_classification": [], "is_valid": True, "missing_info": "", "loop_count": 0}
 
     async def retrieve(self, state: AgentState) -> Dict[str, Any]:
         """
@@ -275,7 +285,7 @@ class InsuranceRAGEngine:
         question = state["question"]
         loop_count = state["loop_count"]
         
-        llm = ChatOpenAI(model="gpt-5-mini", temperature=0, openai_api_key=self.openai_api_key)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=self.openai_api_key)
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", """당신은 RAG 검색 확률을 높이기 위해 사용자의 질문을 검색에 최적화된 형태로 재작성하는 전문가입니다.
@@ -326,16 +336,18 @@ class InsuranceRAGEngine:
             parsed = json.loads(res.content)
             answer = parsed.get("answer", "")
             blocks = parsed.get("blocks", [])
+            consultation_summary = parsed.get("consultation_summary", "")
             print("\n" + "="*50)
             print("📊 [최종 구조화 답변 결과]")
             print(f"Answer: {answer}")
+            print(f"Consultation Summary: {consultation_summary}")
             print(f"Blocks ({len(blocks)}개): {[b.get('block_type') for b in blocks]}")
             print("="*50)
-            return {"generation": answer, "blocks": blocks}
+            return {"generation": answer, "blocks": blocks, "consultation_summary": consultation_summary}
         except Exception as e:
             print(f"⚠️ 답변 생성 중 오류 발생: {e}")
             fallback_msg = "약관 대조 중 오류가 발생하여 기본 안내를 출력합니다."
-            return {"generation": fallback_msg, "blocks": []}
+            return {"generation": fallback_msg, "blocks": [], "consultation_summary": ""}
 
 
     async def check_slots(self, state: AgentState) -> Dict[str, Any]:
@@ -346,6 +358,9 @@ class InsuranceRAGEngine:
         print("❓ [Check Slots Node] 필수 슬롯(보상 조건) 유무 검사 중...")
         question = state["question"]
         slot_values = state.get("slot_values") or {}
+
+        if state.get("is_out_of_scope"):
+            return {"is_out_of_scope": True, "missing_slots": []}
 
         missing_slots = []
         slot_prompt = None
@@ -392,10 +407,22 @@ class InsuranceRAGEngine:
         ]
         return {"generation": prompt_text, "blocks": blocks}
 
-    def decide_to_ask_slots(self, state: AgentState) -> Literal["ask_slots", "retrieve"]:
+    def decide_to_ask_slots(self, state: AgentState) -> Literal["out_of_scope_generate", "ask_slots", "retrieve"]:
+        if state.get("is_out_of_scope"):
+            return "out_of_scope_generate"
         if state.get("missing_slots"):
             return "ask_slots"
         return "retrieve"
+
+    async def out_of_scope_generate(self, state: AgentState) -> Dict[str, Any]:
+        print("🛡️ [Guardrail Node] 부적절/무관 질문 거부 처리...")
+        missing_info = state.get("missing_info") or "손해사정 업무 및 약관 조회 범위를 벗어난 질의"
+        message = f"해당 질의에는 답변할 수 없습니다. (사유: {missing_info})"
+        return {
+            "generation": message,
+            "blocks": [],
+            "consultation_summary": f"[시스템 안내] 답변 불가 질의 거부 (사유: {missing_info})"
+        }
 
     def decide_to_generate(self, state: AgentState) -> Literal["generate", "rewrite_query", "fallback_generate"]:
         filtered_documents = state["documents"]
@@ -434,6 +461,7 @@ class InsuranceRAGEngine:
         workflow.add_node("route_question", self.route_question)
         workflow.add_node("check_slots", self.check_slots)
         workflow.add_node("ask_slots", self.ask_slots)
+        workflow.add_node("out_of_scope_generate", self.out_of_scope_generate)
         workflow.add_node("retrieve", self.retrieve)
         workflow.add_node("grade_documents", self.grade_documents)
         workflow.add_node("rewrite_query", self.rewrite_query)
@@ -447,24 +475,16 @@ class InsuranceRAGEngine:
             "check_slots",
             self.decide_to_ask_slots,
             {
+                "out_of_scope_generate": "out_of_scope_generate",
                 "ask_slots": "ask_slots",
                 "retrieve": "retrieve"
             }
         )
         
-        workflow.add_edge("retrieve", "grade_documents")
-        
-        workflow.add_conditional_edges(
-            "grade_documents",
-            self.decide_to_generate,
-            {
-                "generate": "generate",
-                "rewrite_query": "rewrite_query",
-                "fallback_generate": "fallback_generate"
-            }
-        )
+        workflow.add_edge("retrieve", "generate")
         
         workflow.add_edge("rewrite_query", "retrieve")
+        workflow.add_edge("out_of_scope_generate", END)
         workflow.add_edge("ask_slots", END)
         workflow.add_edge("generate", END)
         workflow.add_edge("fallback_generate", END)
@@ -604,7 +624,7 @@ def run_agentic_rag_json(query: str, task_name: str = "jang", slot_values: Optio
         {
             "section_title": doc.metadata.get("section_title"),
             "page_number": doc.metadata.get("page"),
-            "source_pdf": doc.metadata.get("source_pdf"),
+            "source_pdf": os.path.basename(str(doc.metadata.get("source_pdf", ""))) if doc.metadata.get("source_pdf") else "",
             "full_content": doc.page_content,
         }
         for doc in final_state.get("documents", [])
@@ -623,12 +643,85 @@ def run_agentic_rag_json(query: str, task_name: str = "jang", slot_values: Optio
     output_data = {
         "query": query,
         "status": "NEED_MORE_INFO" if final_state.get("is_valid") is False else "SUCCESS",
+        "task_classification": final_state.get("task_classification") or final_state.get("section_filters") or [],
+        "task_plan": final_state.get("task_plan") or [],
         "answer": final_state.get("generation", ""),
+        "consultation_summary": final_state.get("consultation_summary", ""),
         "blocks": blocks,
         "total_referenced_count": len(referenced_pages),
         "referenced_pages": referenced_pages,
     }
     return json.dumps(output_data, ensure_ascii=False, indent=2)
+
+
+def run_initial_plan_json(query: str, task_name: str = "jang") -> str:
+    """[HITL 1단계] 라우터 0.5초 실행 ➔ 팩트 기반 조사 계획(task_plan) 반환 후 일시 정지(AWAITING_CONFIRMATION)."""
+    engine = InsuranceRAGEngine(task_name=task_name)
+    initial_state = {
+        "question": query,
+        "section_filters": [],
+        "documents": [],
+        "generation": "",
+        "loop_count": 0,
+        "missing_slots": [],
+        "slot_values": {},
+        "slot_prompt": None
+    }
+    
+    try:
+        route_res = asyncio.run(engine.route_question(initial_state))
+    except Exception:
+        route_res = {"is_out_of_scope": False, "is_valid": True, "task_classification": [], "task_plan": []}
+    
+    if route_res.get("is_out_of_scope"):
+        try:
+            out_res = asyncio.run(engine.out_of_scope_generate(route_res))
+            msg = out_res.get("generation", "해당 질의에는 답변할 수 없습니다.")
+        except Exception:
+            msg = "해당 질의에는 답변할 수 없습니다. (사유: 손해사정 업무 범위 무관 질의)"
+        return json.dumps({
+            "query": query,
+            "status": "OUT_OF_SCOPE",
+            "answer": msg,
+            "blocks": [],
+            "consultation_summary": f"[시스템 안내] 답변 불가 질의 거부"
+        }, ensure_ascii=False, indent=2)
+
+    try:
+        check_res = asyncio.run(engine.check_slots({**initial_state, **route_res}))
+    except Exception:
+        check_res = {"missing_slots": []}
+
+    if check_res.get("missing_slots"):
+        try:
+            ask_res = asyncio.run(engine.ask_slots({**initial_state, **route_res, **check_res}))
+            ask_msg = ask_res.get("generation")
+            ask_blocks = ask_res.get("blocks", [])
+        except Exception:
+            ask_msg = "정확한 보상 정밀 산출을 위해 부족한 정보를 보완해 주세요."
+            ask_blocks = []
+        return json.dumps({
+            "query": query,
+            "status": "NEED_MORE_INFO",
+            "answer": ask_msg,
+            "blocks": ask_blocks,
+            "missing_slots": check_res.get("missing_slots")
+        }, ensure_ascii=False, indent=2)
+
+    task_plan = route_res.get("task_plan") or [
+        f"[진단/치료 내역 확인] 입력된 '{query}' 관련 사실 확인",
+        "[약관 대조 계획] 해당 내역에 대한 약관 보장 조항 조회"
+    ]
+    task_classification = route_res.get("task_classification") or route_res.get("section_filters") or []
+
+    return json.dumps({
+        "query": query,
+        "status": "AWAITING_CONFIRMATION",
+        "task_plan": task_plan,
+        "task_classification": task_classification,
+        "answer": "입력된 상담 내용과 팩트를 확인했습니다. **[ ▶️ 약관 DB 조회 시작 ]** 버튼을 누르시면 약관 검색을 진행합니다.",
+        "blocks": []
+    }, ensure_ascii=False, indent=2)
 
 
 
