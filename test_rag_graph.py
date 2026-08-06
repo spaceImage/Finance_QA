@@ -181,6 +181,12 @@ class InsuranceRAGEngine:
         print("🛡️ [Node 2: Query Validation] 처리 가능 범위 검증 중...")
         question = state["question"]
 
+        # 후속 질의 / 짧은 연결 질문인 경우 유효 질의로 자동 통과
+        if len(question) < 35 or any(kw in question for kw in ["그럼", "아까", "추가", "포함", "얼마", "사유", "이유", "왜"]):
+            print("  └ [Query Validation] 연속 대화/후속 질의 감지 -> 유효 질의 자동 통과 (is_valid=True)")
+            logs = self._append_log(state, "query_validation", t0, {"is_valid": True, "reason": "후속 질의 자동 통과"})
+            return {"is_valid": True, "invalidation_reason": "", "node_logs": logs}
+
         llm = self._get_llm("validator", json_mode=True)
         prompt = ChatPromptTemplate.from_messages([
             ("system", QUERY_VALIDATION_PROMPT),

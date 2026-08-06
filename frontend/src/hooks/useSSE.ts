@@ -166,7 +166,10 @@ export function useSSE(): UseSSEReturn {
       setCurrentStepLabel(initLabel);
       setStepLogs([{ step: 1, label: initLabel, timestamp: new Date().toLocaleTimeString() }]);
 
-      const activeSessionId = await createSession(taskName);
+      let activeSessionId = sessionId;
+      if (!activeSessionId) {
+        activeSessionId = await createSession(taskName);
+      }
 
       const encodedQuery = encodeURIComponent(query);
       let url = `${baseUrl}/api/rag/stream?query=${encodedQuery}&task_name=${taskName}`;
