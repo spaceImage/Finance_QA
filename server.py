@@ -93,7 +93,7 @@ def api_get_policy_pdf(task_name: str = "jang"):
     return FileResponse(
         matches[0],
         media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename*=UTF-8''{safe_name}"}
+        headers={"Content-Disposition": 'inline; filename="policy.pdf"'}
     )
 
 @app.get("/api/v1/session/{session_id}")
@@ -170,8 +170,7 @@ async def api_slot_fill(req: SlotFillRequest):
     }
 
 
-
-async def sse_generator(query: str, task_name: str, session_id: Optional[str] = None) -> AsyncGenerator[str, None]:
+async def sse_generator(query: str, task_name: str, session_id: Optional[str] = None, confirm: bool = True) -> AsyncGenerator[str, None]:
     """
     RAG 파이프라인 결과를 SSE(Server-Sent Events) 프로토콜 데이터로 스트리밍 전송하고 감사 로그를 기록합니다.
     """
@@ -202,26 +201,43 @@ async def sse_generator(query: str, task_name: str, session_id: Optional[str] = 
 
     start_time = asyncio.get_event_loop().time()
     try:
+        # Step 1: 라우팅 & 입력 팩트 확인
+        yield f"data: {json.dumps({'step': 1, 'label': '🔮 1단계: 상담 정보 및 특약 라우팅 확인 중...', 'progress': 25}, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(0.05)
+
+        # Step 2: 약관 DB 정밀 검색
+        yield f"data: {json.dumps({'step': 2, 'label': '📚 2단계: 약관 DB 정밀 검색 및 보상 분석 중...', 'progress': 65}, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(0.05)
+
         loop = asyncio.get_event_loop()
         result_json_str = await loop.run_in_executor(
-            None, run_agentic_rag_json, query
+            None, run_agentic_rag_json, query, task_name
         )
-        
+
         result_data = json.loads(result_json_str)
         answer_text = result_data.get("answer", "")
+        blocks = result_data.get("blocks", [])
+        status = result_data.get("status", "SUCCESS")
 
-        # 1. 글자 단위 스트리밍 전송 (chunk 단위)
+        yield f"data: {json.dumps({'step': 3, 'label': '✍️ 3단계: 보상 산출 결과 및 UI 블록 카드 생성 완료', 'progress': 100}, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(0.05)
+
+        # 2. 텍스트 스트리밍 전송 (chunk 단위)
         chunk_size = 5
         for i in range(0, len(answer_text), chunk_size):
             chunk = answer_text[i:i+chunk_size]
             payload = json.dumps({"content": chunk}, ensure_ascii=False)
             yield f"data: {payload}\n\n"
+            await asyncio.sleep(0.01)
 
-        # 2. 최종 구조화 UI Block payload 및 메타데이터 전송
+        # 3. 최종 구조화 UI Block payload 및 메타데이터 전송
         final_payload_dict = {
-            "status": result_data.get("status", "SUCCESS"),
+            "status": status,
+            "task_classification": result_data.get("task_classification", []),
+            "task_plan": result_data.get("task_plan", []),
             "answer": answer_text,
-            "blocks": result_data.get("blocks", []),
+            "consultation_summary": result_data.get("consultation_summary", ""),
+            "blocks": blocks,
             "total_referenced_count": result_data.get("total_referenced_count", 0),
             "referenced_pages": result_data.get("referenced_pages", [])
         }
@@ -237,17 +253,20 @@ async def sse_generator(query: str, task_name: str, session_id: Optional[str] = 
         # 3. Audit Log 자동 기록 (DB)
         execution_time_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
         if session_id:
-            save_audit_log(
-                session_id=session_id,
-                step_name="RAG_STREAM",
-                status="SUCCESS",
-                input_payload={"query": query, "task_name": task_name},
-                output_payload={
-                    "answer_summary": answer_text[:200],
-                    "referenced_count": result_data.get("total_referenced_count", 0)
-                },
-                execution_time_ms=execution_time_ms
-            )
+            try:
+                save_audit_log(
+                    session_id=session_id,
+                    step_name="RAG_STREAM",
+                    status="SUCCESS",
+                    input_payload={"query": query, "task_name": task_name},
+                    output_payload={
+                        "answer_summary": answer_text[:200],
+                        "referenced_count": final_payload_dict.get("total_referenced_count", 0)
+                    },
+                    execution_time_ms=execution_time_ms
+                )
+            except Exception as audit_err:
+                print(f"⚠️ 감사 로그 기록 실패: {audit_err}")
 
         # SSE 완료 신호
         yield "data: [DONE]\n\n"
@@ -275,13 +294,16 @@ async def sse_generator(query: str, task_name: str, session_id: Optional[str] = 
         yield "data: [DONE]\n\n"
 
 @app.get("/api/rag/stream")
+@app.get("/api/stream_agentic_rag")
+@app.get("/api/v1/chat/stream")
 async def rag_stream(
     query: str = Query(..., description="사용자 질문"),
     task_name: str = Query("jang", description="작업명 (기본: jang)"),
+    confirm: bool = Query(False, description="상담사 조사 승인 여부"),
     session_id: Optional[str] = Query(None, description="대화 세션 ID (선택)")
 ):
     return StreamingResponse(
-        sse_generator(query, task_name, session_id),
+        sse_generator(query, task_name, session_id=session_id, confirm=confirm),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
