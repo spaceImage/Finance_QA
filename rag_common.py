@@ -135,13 +135,13 @@ def update_session_state(session_id: str, metadata_updates: dict) -> bool:
 
 
 def save_audit_log(
-    session_id: str | None,
+    session_id: Optional[str],
     step_name: str,
     status: str = "SUCCESS",
-    input_payload: dict | None = None,
-    output_payload: dict | None = None,
+    input_payload: Optional[dict] = None,
+    output_payload: Optional[dict] = None,
     execution_time_ms: int = 0
-) -> dict | None:
+) -> Optional[dict]:
     """RAG 오케스트레이터 각 단계(S1~S4)의 실행 이력을 audit_logs 테이블에 기록합니다."""
     if not session_id:
         return None
@@ -162,7 +162,7 @@ def save_audit_log(
     return None
 
 
-def get_session_audit_logs(session_id: str) -> list[dict]:
+def get_session_audit_logs(session_id: str) -> List[dict]:
     """특정 세션의 전체 audit_logs 이력을 생성 시각 순으로 조회합니다."""
     try:
         client = get_supabase_client()
