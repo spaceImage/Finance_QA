@@ -138,6 +138,19 @@ async def api_slot_fill(req: SlotFillRequest):
     )
     result_data = json.loads(result_json_str)
 
+    # 최종 결과를 Session Metadata에 누적 캐싱 저장 (Summary API 및 재연결 대응)
+    final_result = {
+        "status": result_data.get("status", "SUCCESS"),
+        "answer": result_data.get("answer", ""),
+        "blocks": result_data.get("blocks", []),
+        "total_referenced_count": result_data.get("total_referenced_count", 0),
+        "referenced_pages": result_data.get("referenced_pages", [])
+    }
+    try:
+        update_session_state(req.session_id, {"final_result": final_result})
+    except Exception as save_err:
+        print(f"⚠️ 슬롯 보완 후 결과 캐싱 실패: {save_err}")
+
     # 4. Audit Log 기록
     save_audit_log(
         session_id=req.session_id,
@@ -158,14 +171,35 @@ async def api_slot_fill(req: SlotFillRequest):
 
 
 
-async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]:
-    """
-    RAG 파이프라인 결과를 SSE(Server-Sent Events) 프로토콜 데이터로 스트리밍 전송합니다.
-    """
 async def sse_generator(query: str, task_name: str, session_id: Optional[str] = None) -> AsyncGenerator[str, None]:
     """
     RAG 파이프라인 결과를 SSE(Server-Sent Events) 프로토콜 데이터로 스트리밍 전송하고 감사 로그를 기록합니다.
     """
+    # 1. 브라우저에게 끊겼을 때 3초(3000ms) 후에 재연결을 시도하라고 지정
+    yield "retry: 3000\n\n"
+
+    # 2. 만약 재연결 요청이라면, 이미 이전에 계산이 끝난 캐싱 데이터가 있는지 세션 조회
+    if session_id:
+        try:
+            session_info = get_session_state(session_id)
+            if session_info:
+                cached_result = session_info.get("metadata", {}).get("final_result")
+                if cached_result:
+                    # 캐싱된 텍스트 답변 스트리밍 재현
+                    answer_text = cached_result.get("answer", "")
+                    chunk_size = 5
+                    for i in range(0, len(answer_text), chunk_size):
+                        chunk = answer_text[i:i+chunk_size]
+                        yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                        await asyncio.sleep(0.01)
+                    
+                    # 캐싱된 최종 구조화 Block 전송
+                    yield f"data: {json.dumps(cached_result, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+        except Exception as cache_err:
+            print(f"⚠️ 세션 캐시 조회 실패: {cache_err}")
+
     start_time = asyncio.get_event_loop().time()
     try:
         loop = asyncio.get_event_loop()
@@ -184,14 +218,21 @@ async def sse_generator(query: str, task_name: str, session_id: Optional[str] = 
             yield f"data: {payload}\n\n"
 
         # 2. 최종 구조화 UI Block payload 및 메타데이터 전송
-        final_payload = json.dumps({
+        final_payload_dict = {
             "status": result_data.get("status", "SUCCESS"),
             "answer": answer_text,
             "blocks": result_data.get("blocks", []),
             "total_referenced_count": result_data.get("total_referenced_count", 0),
             "referenced_pages": result_data.get("referenced_pages", [])
-        }, ensure_ascii=False)
-        yield f"data: {final_payload}\n\n"
+        }
+        yield f"data: {json.dumps(final_payload_dict, ensure_ascii=False)}\n\n"
+
+        # 2.5 최종 결과를 Session Metadata에 누적 캐싱 저장 (Summary API 및 재연결 대응)
+        if session_id:
+            try:
+                update_session_state(session_id, {"final_result": final_payload_dict})
+            except Exception as save_err:
+                print(f"⚠️ 최종 결과 캐싱 실패: {save_err}")
 
         # 3. Audit Log 자동 기록 (DB)
         execution_time_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
@@ -212,8 +253,26 @@ async def sse_generator(query: str, task_name: str, session_id: Optional[str] = 
         yield "data: [DONE]\n\n"
 
     except Exception as e:
-        error_payload = json.dumps({"error": str(e)}, ensure_ascii=False)
-        yield f"data: {error_payload}\n\n"
+        print(f"⚠️ RAG 스트리밍 예외 발생: {e}")
+        error_message = "\n\n⚠️ 죄송합니다. 시스템 오류가 발생하여 약관 대조 분석에 실패했습니다. 질문을 구체화하여 다시 시도해 주시길 바랍니다."
+        
+        # 1. 텍스트 스트리밍 영역에 경고 문구 추가 전달
+        yield f"data: {json.dumps({'content': error_message}, ensure_ascii=False)}\n\n"
+        
+        # 2. 프론트엔드가 가진 UI Block 템플릿 규격에 맞추어 경고(CAUTION) 블록으로 전달
+        fallback_payload = {
+            "status": "ERROR",
+            "answer": error_message,
+            "blocks": [
+                {
+                    "block_type": "CAUTION",
+                    "title": "시스템 오류 및 Fallback 안내",
+                    "content": "RAG 오케스트레이션 엔진 수행 중 에러가 감지되었습니다. 원활한 답변 작성이 어려우니 재시도해 주십시오."
+                }
+            ]
+        }
+        yield f"data: {json.dumps(fallback_payload, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
 
 @app.get("/api/rag/stream")
 async def rag_stream(
@@ -230,6 +289,27 @@ async def rag_stream(
             "X-Accel-Buffering": "no"
         }
     )
+
+
+@app.get("/api/v1/chat/summary")
+def api_get_chat_summary(session_id: str = Query(..., description="대화 세션 ID")):
+    """저장된 세션 메타데이터에서 4단계 최종 산출 결과를 가져와 반환합니다."""
+    session_info = get_session_state(session_id)
+    if not session_info:
+        raise HTTPException(status_code=404, detail="해당 세션을 찾을 수 없습니다.")
+    
+    metadata = session_info.get("metadata", {})
+    final_result = metadata.get("final_result")
+    
+    if not final_result:
+        raise HTTPException(status_code=404, detail="최종 산출 결과가 생성되지 않았거나 진행 중인 세션입니다.")
+        
+    return {
+        "status": "success",
+        "session_id": session_id,
+        "result": final_result
+    }
+
 
 if __name__ == "__main__":
     import uvicorn
