@@ -1,7 +1,8 @@
 import os
 import json
 import asyncio
-from typing import AsyncGenerator, Optional
+import datetime
+from typing import AsyncGenerator, List, Optional
 from pydantic import BaseModel
 from fastapi import FastAPI, Query, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +10,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 
 # main 브랜치 최신 Agentic RAG 파이프라인 연동 및 세션 헬퍼
 from test_rag_graph import run_agentic_rag_json
-from rag_common import create_session, get_session_state, update_session_state, load_policy_md
+from rag_common import create_session, get_session_state, update_session_state, load_policy_md, save_audit_log
 
 app = FastAPI(title="Finance QA Agentic RAG SSE Server")
 
