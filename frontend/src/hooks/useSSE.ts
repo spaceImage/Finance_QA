@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 export interface Citation {
   id: number;
@@ -26,6 +26,13 @@ export interface StepLog {
   timestamp: string;
 }
 
+export interface NodeLog {
+  node: string;
+  duration_ms: number;
+  timestamp: string;
+  [key: string]: any;
+}
+
 interface UseSSEReturn {
   data: string;
   blocks: UIBlock[];
@@ -35,10 +42,16 @@ interface UseSSEReturn {
   progress: number;
   currentStepLabel: string;
   stepLogs: StepLog[];
+  nodeLogs: NodeLog[];
+  tasks: string[];
+  intent: string;
+  llmCalls: number;
+  loopCount: number;
   error: string | null;
   sessionId: string | null;
   startStream: (query: string, taskName?: string) => Promise<void>;
   sendSlotFill: (slotKey: string, slotValue: string, taskName?: string) => Promise<void>;
+  approveTaskPlan: (approvedTasks?: string[], taskName?: string) => Promise<void>;
   stopStream: () => void;
   resetStream: () => void;
 }
@@ -52,10 +65,51 @@ export function useSSE(): UseSSEReturn {
   const [progress, setProgress] = useState<number>(0);
   const [currentStepLabel, setCurrentStepLabel] = useState<string>("");
   const [stepLogs, setStepLogs] = useState<StepLog[]>([]);
+  const [nodeLogs, setNodeLogs] = useState<NodeLog[]>([]);
+  const [tasks, setTasks] = useState<string[]>([]);
+  const [intent, setIntent] = useState<string>("");
+  const [llmCalls, setLlmCalls] = useState<number>(0);
+  const [loopCount, setLoopCount] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  // 컴포넌트 마운트 시 저장된 세션 복원
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = sessionStorage.getItem("active_rag_session");
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed.sessionId) setSessionId(parsed.sessionId);
+          if (parsed.answer) setData(parsed.answer);
+          if (parsed.blocks) setBlocks(parsed.blocks);
+          if (parsed.status) setStatus(parsed.status);
+          if (parsed.nodeLogs) setNodeLogs(parsed.nodeLogs);
+          if (parsed.tasks) setTasks(parsed.tasks);
+          if (parsed.intent) setIntent(parsed.intent);
+          if (parsed.llmCalls) setLlmCalls(parsed.llmCalls);
+          if (parsed.loopCount) setLoopCount(parsed.loopCount);
+          if (parsed.stepLogs) setStepLogs(parsed.stepLogs);
+        } catch (e) {
+          console.warn("세션 복원 실패:", e);
+        }
+      }
+    }
+  }, []);
+
+  const saveToSessionStorage = (updated: Record<string, any>) => {
+    if (typeof window !== "undefined") {
+      const existing = sessionStorage.getItem("active_rag_session");
+      let currentData = {};
+      if (existing) {
+        try { currentData = JSON.parse(existing); } catch (e) {}
+      }
+      const newDump = { ...currentData, ...updated, timestamp: new Date().toISOString() };
+      sessionStorage.setItem("active_rag_session", JSON.stringify(newDump));
+    }
+  };
 
   const stopStream = useCallback(() => {
     if (eventSourceRef.current) {
@@ -73,6 +127,11 @@ export function useSSE(): UseSSEReturn {
     setProgress(0);
     setCurrentStepLabel("");
     setStepLogs([]);
+    setNodeLogs([]);
+    setTasks([]);
+    setIntent("");
+    setLlmCalls(0);
+    setLoopCount(0);
     setError(null);
     setIsCompleted(false);
   }, [stopStream]);
@@ -89,6 +148,7 @@ export function useSSE(): UseSSEReturn {
       const resData = await res.json();
       if (resData.session_id) {
         setSessionId(resData.session_id);
+        saveToSessionStorage({ sessionId: resData.session_id });
         return resData.session_id;
       }
     } catch (e) {
@@ -114,6 +174,8 @@ export function useSSE(): UseSSEReturn {
         url += `&session_id=${activeSessionId}`;
       }
 
+      let accumulatedText = "";
+
       try {
         const es = new EventSource(url);
         eventSourceRef.current = es;
@@ -128,11 +190,37 @@ export function useSSE(): UseSSEReturn {
               setIsCompleted(true);
               setProgress(100);
               stopStream();
+              saveToSessionStorage({ query, answer: accumulatedText, isCompleted: true });
               return;
             }
 
             const parsed = JSON.parse(event.data);
-            if (parsed.progress !== undefined) {
+            if (parsed.progress_node) {
+              if (parsed.node_logs) {
+                setNodeLogs(parsed.node_logs);
+                const calls = parsed.node_logs.filter((n: any) =>
+                  ["task_planner", "query_validation", "intent_router", "grade_documents", "multi_hop_reasoning", "generate", "out_of_scope_response"].includes(n.node)
+                ).length;
+                setLlmCalls(calls);
+
+                const loops = parsed.node_logs.filter((n: any) => n.node === "multi_hop_reasoning" || n.node === "rewrite_query").length;
+                setLoopCount(loops);
+
+                saveToSessionStorage({
+                  sessionId: activeSessionId,
+                  query,
+                  status: parsed.status || "RUNNING",
+                  nodeLogs: parsed.node_logs || [],
+                  tasks: parsed.tasks || [],
+                  intent: parsed.intent || "",
+                  llmCalls: calls,
+                  loopCount: loops,
+                });
+              }
+              if (parsed.tasks) setTasks(parsed.tasks);
+              if (parsed.intent) setIntent(parsed.intent);
+              if (parsed.status) setStatus(parsed.status);
+            } else if (parsed.progress !== undefined) {
               setProgress(parsed.progress);
               if (parsed.label) {
                 setCurrentStepLabel(parsed.label);
@@ -144,17 +232,37 @@ export function useSSE(): UseSSEReturn {
             } else if (parsed.blocks && Array.isArray(parsed.blocks)) {
               setBlocks(parsed.blocks);
               if (parsed.status) setStatus(parsed.status);
+              if (parsed.node_logs) setNodeLogs(parsed.node_logs);
+              if (parsed.tasks) setTasks(parsed.tasks);
+              if (parsed.intent) setIntent(parsed.intent);
               setProgress(100);
+
+              const calls = (parsed.node_logs || []).filter((n: any) =>
+                ["task_planner", "query_validation", "intent_router", "grade_documents", "multi_hop_reasoning", "generate", "out_of_scope_response"].includes(n.node)
+              ).length;
+              setLlmCalls(calls);
+
+              saveToSessionStorage({
+                sessionId: activeSessionId,
+                query,
+                status: parsed.status || "SUCCESS",
+                blocks: parsed.blocks,
+                nodeLogs: parsed.node_logs || [],
+                tasks: parsed.tasks || [],
+                intent: parsed.intent || "",
+                llmCalls: calls,
+              });
             } else if (parsed.content) {
-              setData((prev) => prev + parsed.content);
+              accumulatedText += parsed.content;
+              setData(accumulatedText);
             }
           } catch {
-            setData((prev) => prev + event.data);
+            accumulatedText += event.data;
+            setData(accumulatedText);
           }
         };
 
-        es.onerror = (err) => {
-          console.error("SSE Connection Error:", err);
+        es.onerror = () => {
           setIsCompleted(true);
           stopStream();
         };
@@ -169,7 +277,6 @@ export function useSSE(): UseSSEReturn {
   const sendSlotFill = useCallback(
     async (slotKey: string, slotValue: string, taskName: string = "jang") => {
       if (!sessionId) {
-        // 세션 ID가 없을 경우 신규 생성
         const newSid = await createSession(taskName);
         if (!newSid) {
           setError("세션 정보를 찾을 수 없습니다.");
@@ -178,9 +285,6 @@ export function useSSE(): UseSSEReturn {
       }
 
       setIsLoading(true);
-      setError(null);
-      setData((prev) => prev + `\n\n💬 [보완 답변 전송]: ${slotValue}\n🔄 보완된 정보로 정밀 계산 중...\n\n`);
-
       try {
         const res = await fetch(`${baseUrl}/api/v1/chat/slot-fill`, {
           method: "POST",
@@ -192,22 +296,82 @@ export function useSSE(): UseSSEReturn {
             task_name: taskName,
           }),
         });
-
         const resData = await res.json();
         if (resData.status === "success" && resData.result) {
-          const finalAnswer = resData.result.answer || "보상 계산이 완료되었습니다.";
-          setData((prev) => prev + finalAnswer);
-        } else {
-          setError("슬롯 보완 답변 처리에 실패했습니다.");
+          const result = resData.result;
+          setData(result.answer || "");
+          setBlocks(result.blocks || []);
+          if (result.node_logs) setNodeLogs(result.node_logs);
+          if (result.tasks) setTasks(result.tasks);
+          if (result.intent) setIntent(result.intent);
+          setStatus(result.status || "SUCCESS");
+          setIsCompleted(true);
+
+          saveToSessionStorage({
+            sessionId,
+            status: result.status || "SUCCESS",
+            answer: result.answer || "",
+            blocks: result.blocks || [],
+            nodeLogs: result.node_logs || [],
+            tasks: result.tasks || [],
+            intent: result.intent || [],
+          });
         }
-      } catch (e: any) {
-        setError(e.message || "Slot-fill API 호출 에러가 발생했습니다.");
+      } catch (err: any) {
+        setError(err.message || "슬롯 보완 전송에 실패했습니다.");
       } finally {
         setIsLoading(false);
-        setIsCompleted(true);
       }
     },
     [sessionId, baseUrl]
+  );
+
+  const approveTaskPlan = useCallback(
+    async (approvedTasks?: string[], taskName: string = "jang") => {
+      if (!sessionId) {
+        setError("세션 정보를 찾을 수 없습니다.");
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const res = await fetch(`${baseUrl}/api/v1/chat/approve-task-plan`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            approved_tasks: approvedTasks || tasks,
+            task_name: taskName,
+          }),
+        });
+        const resData = await res.json();
+        if (resData.status === "success" && resData.result) {
+          const result = resData.result;
+          setData(result.answer || "");
+          setBlocks(result.blocks || []);
+          if (result.node_logs) setNodeLogs(result.node_logs);
+          if (result.tasks) setTasks(result.tasks);
+          if (result.intent) setIntent(result.intent);
+          setStatus(result.status || "SUCCESS");
+          setIsCompleted(true);
+
+          saveToSessionStorage({
+            sessionId,
+            status: result.status || "SUCCESS",
+            answer: result.answer || "",
+            blocks: result.blocks || [],
+            nodeLogs: result.node_logs || [],
+            tasks: result.tasks || [],
+            intent: result.intent || "",
+          });
+        }
+      } catch (err: any) {
+        setError(err.message || "작업 승인 처리 실패");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [sessionId, tasks, baseUrl]
   );
 
   return {
@@ -219,12 +383,17 @@ export function useSSE(): UseSSEReturn {
     progress,
     currentStepLabel,
     stepLogs,
+    nodeLogs,
+    tasks,
+    intent,
+    llmCalls,
+    loopCount,
     error,
     sessionId,
     startStream,
     sendSlotFill,
+    approveTaskPlan,
     stopStream,
     resetStream,
   };
 }
-

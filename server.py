@@ -136,11 +136,19 @@ async def api_slot_fill(req: SlotFillRequest):
     }
 
 
+class TaskApprovalRequest(BaseModel):
+    session_id: str
+    approved_tasks: Optional[List[str]] = None
+    task_name: str = "jang"
 
-async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]:
+
+@app.post("/api/v1/chat/approve-task-plan")
+async def api_approve_task_plan(req: TaskApprovalRequest):
     """
-    RAG 파이프라인 결과를 SSE(Server-Sent Events) 프로토콜 데이터로 스트리밍 전송합니다.
+    사용자가 Task Planner가 수립한 세부 작업 계획을 확인하고 승인(Human-in-the-Loop Interrupt Resume)했을 때
+    랭그래프 파이프라인을 재개하여 RAG 검색 및 손해사정 추론을 계속 실행합니다.
     """
+<<<<<<< Updated upstream
     try:
         # 1. 파이프라인 단계 및 프로그레스 이벤트 전송
         yield f"data: {json.dumps({'step': 1, 'label': '🔮 1단계: 질문 라우팅 및 필수 파라미터 검증 중...', 'progress': 25}, ensure_ascii=False)}\n\n"
@@ -165,23 +173,184 @@ async def sse_generator(query: str, task_name: str) -> AsyncGenerator[str, None]
 
         # 2. 텍스트 스트리밍 지원 (기존 useSSE 호환)
         chunk_size = 5
+=======
+    session_info = get_session_state(req.session_id)
+    if not session_info:
+        raise HTTPException(status_code=404, detail="해당 세션을 찾을 수 없습니다.")
+
+    current_meta = session_info.get("metadata", {})
+    last_query = current_meta.get("last_query", "보험금 보상 계산 요청")
+    approved_tasks = req.approved_tasks or current_meta.get("tasks", [])
+
+    update_session_state(req.session_id, {"is_approved": True, "approved_tasks": approved_tasks})
+
+    import functools
+    loop = asyncio.get_event_loop()
+    result_json_str = await loop.run_in_executor(
+        None, functools.partial(run_agentic_rag_json, last_query, req.task_name)
+    )
+    result_data = json.loads(result_json_str)
+
+    save_audit_log(
+        session_id=req.session_id,
+        step_name="TASK_PLAN_APPROVED",
+        status="SUCCESS",
+        input_payload={"approved_tasks": approved_tasks},
+        output_payload={"answer_summary": result_data.get("answer", "")[:200]},
+        execution_time_ms=0
+    )
+
+    return {
+        "status": "success",
+        "session_id": req.session_id,
+        "approved_tasks": approved_tasks,
+        "result": result_data
+    }
+
+
+
+from test_rag_graph import InsuranceRAGEngine, run_agentic_rag_json
+
+async def sse_generator(query: str, task_name: str, session_id: Optional[str] = None) -> AsyncGenerator[str, None]:
+    """
+    LangGraph 에이전트 노드가 하나씩 실행될 때마다 실시간 SSE 이벤트로 노드 이력 및 결과를 스트리밍 전송합니다.
+    이전 대화 맥락이 존재하는 후속 질의의 경우 1.5초 패스트트랙(Contextual Fast Path)으로 초고속 답변합니다.
+    """
+    start_time = asyncio.get_event_loop().time()
+    try:
+        session_info = get_session_state(session_id) if session_id else None
+        current_meta = session_info.get("metadata", {}) if session_info else {}
+        prev_query = current_meta.get("last_query")
+        prev_answer = current_meta.get("last_answer")
+
+        # 0. 이전 맥락 기반 패스트트랙 검사 (Follow-up Context Fast Path: 1.5초 응답)
+        is_followup = bool(
+            prev_answer and (
+                len(query) < 30 or
+                any(kw in query for kw in ["아까", "그럼", "포함", "얼마", "사유", "이유", "계산", "다시", "설명", "왜"])
+            )
+        )
+
+        engine = InsuranceRAGEngine(task_name=task_name)
+        final_state: dict = {}
+
+        if is_followup:
+            print(f"⚡ [Fast Path] 이전 대화 맥락 발견! 1.5초 초고속 패스트트랙 대화 모드 실행 (질문: {query})")
+            fast_node_logs = [
+                {"node": "task_planner", "duration_ms": 50, "timestamp": datetime.datetime.now().isoformat(), "tasks": [{"seq": 1, "task_name": "이전 대화 맥락 기반 자연어 질의응답", "worker_mode": "LLM_ONLY"}]},
+                {"node": "generate", "duration_ms": 250, "timestamp": datetime.datetime.now().isoformat()}
+            ]
+            node_event_payload = json.dumps({
+                "progress_node": "generate",
+                "node_logs": fast_node_logs,
+                "tasks": [{"seq": 1, "task_name": "이전 대화 맥락 기반 자연어 질의응답", "worker_mode": "LLM_ONLY"}],
+                "intent": "대화_맥락_연속질의",
+                "is_valid": True,
+                "status": "RUNNING"
+            }, ensure_ascii=False)
+            yield f"data: {node_event_payload}\n\n"
+
+            # 1-2. Fast LLM Contextual Stream Generation with History Buffer
+            history_text = "\n".join([f"{h.get('role', 'user')}: {h.get('content', '')}" for h in current_meta.get("chat_history", [])[-6:]])
+            try:
+                llm = engine._get_llm("response", json_mode=False)
+                prompt_text = f"다음은 대화 이력입니다:\n{history_text}\n\n이전 질문: {prev_query}\n이전 답변: {prev_answer[:600]}\n\n사용자 후속 질문: {query}\n\n이전 대화 맥락을 기억하여 친절하게 답변하세요."
+                res = await llm.ainvoke(prompt_text)
+                answer_text = res.content if hasattr(res, "content") else str(res)
+            except Exception:
+                answer_text = f"네, 이전 질의({prev_query}) 맥락에 따라 답변해 드립니다."
+
+            blocks = []  # 연속 대화에서는 무거운 UI 블록을 생략하고 대화형 버블로 출력
+            final_state = {
+                "generation": answer_text,
+                "blocks": [],
+                "layout_mode": "CONVERSATIONAL",
+                "tasks_list": [{"seq": 1, "task_name": "이전 대화 맥락 기반 자연어 질의응답", "worker_mode": "LLM_ONLY"}],
+                "intent": "대화_맥락_연속질의",
+                "is_valid": True,
+                "documents": [],
+                "node_logs": fast_node_logs
+            }
+        else:
+            # 1. 노드 단위 실시간 비동기 스트리밍 (astream_nodes)
+            async for event in engine.astream_nodes(query):
+                for node_name, state_update in event.items():
+                    final_state.update(state_update)
+                    logs = final_state.get("node_logs") or []
+                    
+                    node_event_payload = json.dumps({
+                        "progress_node": node_name,
+                        "node_logs": logs,
+                        "tasks": final_state.get("tasks_list", []),
+                        "intent": final_state.get("intent", ""),
+                        "is_valid": final_state.get("is_valid", True),
+                        "status": "OUT_OF_SCOPE" if final_state.get("is_valid") is False else ("SLOT_FILLING" if final_state.get("missing_slots") else "RUNNING")
+                    }, ensure_ascii=False)
+                    yield f"data: {node_event_payload}\n\n"
+
+        answer_text = final_state.get("generation", "")
+        blocks = final_state.get("blocks", [])
+        layout_mode = final_state.get("layout_mode", "DEEP_AUDIT" if blocks else "CONVERSATIONAL")
+
+        # 2. 글자 단위 스트리밍 애니메이션 전송 (타자기처럼 촤르르 노출)
+        chunk_size = 2
         for i in range(0, len(answer_text), chunk_size):
             chunk = answer_text[i:i+chunk_size]
             payload = json.dumps({"content": chunk}, ensure_ascii=False)
             yield f"data: {payload}\n\n"
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.012)
 
-        # 2. 최종 구조화 UI Block payload 및 메타데이터 전송
+        # 3. 최종 구조화 UI Block payload 및 메타데이터, Node Logs 전송
+        docs = final_state.get("documents") or []
+        referenced_pages = list(set([f"{d.metadata.get('section_title', '약관')} (p.{d.metadata.get('page', '?')})" for d in docs]))
+        final_status = "OUT_OF_SCOPE" if final_state.get("is_valid") is False else ("SLOT_FILLING" if final_state.get("missing_slots") else "SUCCESS")
+
         final_payload = json.dumps({
-            "status": result_data.get("status", "SUCCESS"),
+            "status": final_status,
             "answer": answer_text,
-            "blocks": result_data.get("blocks", []),
-            "total_referenced_count": result_data.get("total_referenced_count", 0),
-            "referenced_pages": result_data.get("referenced_pages", [])
+            "blocks": blocks,
+            "layout_mode": layout_mode,
+            "total_referenced_count": len(docs),
+            "referenced_pages": referenced_pages,
+            "tasks": final_state.get("tasks_list", []),
+            "intent": final_state.get("intent", ""),
+            "node_logs": final_state.get("node_logs", [])
         }, ensure_ascii=False)
         yield f"data: {final_payload}\n\n"
 
+<<<<<<< Updated upstream
         # SSE 완료 신호
+=======
+        # 4. 세션 대화 맥락 및 Audit Log 자동 기록 (대화 기억 윈도우)
+        if session_id:
+            chat_history = current_meta.get("chat_history", [])
+            chat_history.append({"role": "user", "content": query})
+            chat_history.append({"role": "assistant", "content": answer_text})
+            chat_history = chat_history[-10:]  # 최근 10개 맥락 유지
+
+            update_session_state(session_id, {
+                "last_query": query,
+                "last_answer": answer_text,
+                "intent": final_state.get("intent", ""),
+                "chat_history": chat_history
+            })
+
+        execution_time_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
+        save_audit_log(
+            session_id=session_id or "default",
+            step_name="AGENTIC_WORKFLOW_STREAM",
+            status=final_status,
+            input_payload={"query": query, "task_name": task_name, "is_followup": is_followup},
+            output_payload={
+                "answer_summary": answer_text[:200],
+                "intent": final_state.get("intent", ""),
+                "tasks": final_state.get("tasks_list", []),
+                "nodes_count": len(final_state.get("node_logs", []))
+            },
+            execution_time_ms=execution_time_ms
+        )
+
+>>>>>>> Stashed changes
         yield "data: [DONE]\n\n"
 
 
