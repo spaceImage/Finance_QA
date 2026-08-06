@@ -7,9 +7,9 @@ from fastapi import FastAPI, Query, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 
-# main 브랜치 최신 Agentic RAG 파이프라인 연동 및 세션/감사로그 헬퍼
+# main 브랜치 최신 Agentic RAG 파이프라인 연동 및 세션 헬퍼
 from test_rag_graph import run_agentic_rag_json
-from rag_common import create_session, get_session_state, update_session_state, load_policy_md, save_audit_log, get_session_audit_logs
+from rag_common import create_session, get_session_state, update_session_state, load_policy_md
 
 app = FastAPI(title="Finance QA Agentic RAG SSE Server")
 
@@ -53,17 +53,6 @@ class SlotFillRequest(BaseModel):
     slot_value: str
     task_name: Optional[str] = "jang"
 
-@app.get("/api/v1/session/{session_id}/logs")
-def api_get_session_logs(session_id: str):
-    """특정 세션의 감사 로그(Audit Logs) 전체 이력을 반환합니다."""
-    logs = get_session_audit_logs(session_id)
-    return {
-        "status": "success",
-        "session_id": session_id,
-        "total_count": len(logs),
-        "logs": logs
-    }
-
 @app.get("/api/v1/policy/{task_name}")
 def api_get_policy(task_name: str = "jang"):
     """고객의 보험증권(certificate.md) 원문 텍스트를 반환합니다."""
@@ -93,7 +82,7 @@ def api_get_policy_pdf(task_name: str = "jang"):
     return FileResponse(
         matches[0],
         media_type="application/pdf",
-        headers={"Content-Disposition": 'inline; filename="policy.pdf"'}
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{safe_name}"}
     )
 
 @app.get("/api/v1/session/{session_id}")
@@ -138,29 +127,6 @@ async def api_slot_fill(req: SlotFillRequest):
     )
     result_data = json.loads(result_json_str)
 
-    # 최종 결과를 Session Metadata에 누적 캐싱 저장 (Summary API 및 재연결 대응)
-    final_result = {
-        "status": result_data.get("status", "SUCCESS"),
-        "answer": result_data.get("answer", ""),
-        "blocks": result_data.get("blocks", []),
-        "total_referenced_count": result_data.get("total_referenced_count", 0),
-        "referenced_pages": result_data.get("referenced_pages", [])
-    }
-    try:
-        update_session_state(req.session_id, {"final_result": final_result})
-    except Exception as save_err:
-        print(f"⚠️ 슬롯 보완 후 결과 캐싱 실패: {save_err}")
-
-    # 4. Audit Log 기록
-    save_audit_log(
-        session_id=req.session_id,
-        step_name="SLOT_FILL",
-        status="SUCCESS",
-        input_payload={"slot_key": req.slot_key, "slot_value": req.slot_value},
-        output_payload={"answer_summary": result_data.get("answer", "")[:200]},
-        execution_time_ms=0
-    )
-
     return {
         "status": "success",
         "session_id": req.session_id,
@@ -170,140 +136,206 @@ async def api_slot_fill(req: SlotFillRequest):
     }
 
 
-async def sse_generator(query: str, task_name: str, session_id: Optional[str] = None, confirm: bool = True) -> AsyncGenerator[str, None]:
-    """
-    RAG 파이프라인 결과를 SSE(Server-Sent Events) 프로토콜 데이터로 스트리밍 전송하고 감사 로그를 기록합니다.
-    """
-    # 1. 브라우저에게 끊겼을 때 3초(3000ms) 후에 재연결을 시도하라고 지정
-    yield "retry: 3000\n\n"
+class TaskApprovalRequest(BaseModel):
+    session_id: str
+    approved_tasks: Optional[List[str]] = None
+    task_name: str = "jang"
 
-    # 2. 만약 재연결 요청이라면, 이미 이전에 계산이 끝난 캐싱 데이터가 있는지 세션 조회
-    if session_id:
-        try:
-            session_info = get_session_state(session_id)
-            if session_info:
-                cached_result = session_info.get("metadata", {}).get("final_result")
-                if cached_result:
-                    # 캐싱된 텍스트 답변 스트리밍 재현
-                    answer_text = cached_result.get("answer", "")
-                    chunk_size = 5
-                    for i in range(0, len(answer_text), chunk_size):
-                        chunk = answer_text[i:i+chunk_size]
-                        yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
-                        await asyncio.sleep(0.01)
-                    
-                    # 캐싱된 최종 구조화 Block 전송
-                    yield f"data: {json.dumps(cached_result, ensure_ascii=False)}\n\n"
-                    yield "data: [DONE]\n\n"
-                    return
-        except Exception as cache_err:
-            print(f"⚠️ 세션 캐시 조회 실패: {cache_err}")
 
+@app.post("/api/v1/chat/approve-task-plan")
+async def api_approve_task_plan(req: TaskApprovalRequest):
+    """
+    사용자가 Task Planner가 수립한 세부 작업 계획을 확인하고 승인(Human-in-the-Loop Interrupt Resume)했을 때
+    랭그래프 파이프라인을 재개하여 RAG 검색 및 손해사정 추론을 계속 실행합니다.
+    """
+    session_info = get_session_state(req.session_id)
+    if not session_info:
+        raise HTTPException(status_code=404, detail="해당 세션을 찾을 수 없습니다.")
+
+    current_meta = session_info.get("metadata", {})
+    last_query = current_meta.get("last_query", "보험금 보상 계산 요청")
+    approved_tasks = req.approved_tasks or current_meta.get("tasks", [])
+
+    update_session_state(req.session_id, {"is_approved": True, "approved_tasks": approved_tasks})
+
+    import functools
+    loop = asyncio.get_event_loop()
+    result_json_str = await loop.run_in_executor(
+        None, functools.partial(run_agentic_rag_json, last_query, req.task_name)
+    )
+    result_data = json.loads(result_json_str)
+
+    save_audit_log(
+        session_id=req.session_id,
+        step_name="TASK_PLAN_APPROVED",
+        status="SUCCESS",
+        input_payload={"approved_tasks": approved_tasks},
+        output_payload={"answer_summary": result_data.get("answer", "")[:200]},
+        execution_time_ms=0
+    )
+
+    return {
+        "status": "success",
+        "session_id": req.session_id,
+        "approved_tasks": approved_tasks,
+        "result": result_data
+    }
+
+
+
+from test_rag_graph import InsuranceRAGEngine, run_agentic_rag_json
+
+async def sse_generator(query: str, task_name: str, session_id: Optional[str] = None) -> AsyncGenerator[str, None]:
+    """
+    LangGraph 에이전트 노드가 하나씩 실행될 때마다 실시간 SSE 이벤트로 노드 이력 및 결과를 스트리밍 전송합니다.
+    이전 대화 맥락이 존재하는 후속 질의의 경우 1.5초 패스트트랙(Contextual Fast Path)으로 초고속 답변합니다.
+    """
     start_time = asyncio.get_event_loop().time()
     try:
-        # Step 1: 라우팅 & 입력 팩트 확인
-        yield f"data: {json.dumps({'step': 1, 'label': '🔮 1단계: 상담 정보 및 특약 라우팅 확인 중...', 'progress': 25}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.05)
+        session_info = get_session_state(session_id) if session_id else None
+        current_meta = session_info.get("metadata", {}) if session_info else {}
+        prev_query = current_meta.get("last_query")
+        prev_answer = current_meta.get("last_answer")
 
-        # Step 2: 약관 DB 정밀 검색
-        yield f"data: {json.dumps({'step': 2, 'label': '📚 2단계: 약관 DB 정밀 검색 및 보상 분석 중...', 'progress': 65}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.05)
-
-        loop = asyncio.get_event_loop()
-        result_json_str = await loop.run_in_executor(
-            None, run_agentic_rag_json, query, task_name
+        # 0. 이전 맥락 기반 패스트트랙 검사 (Follow-up Context Fast Path: 1.5초 응답)
+        is_followup = bool(
+            prev_answer and (
+                len(query) < 30 or
+                any(kw in query for kw in ["아까", "그럼", "포함", "얼마", "사유", "이유", "계산", "다시", "설명", "왜"])
+            )
         )
 
-        result_data = json.loads(result_json_str)
-        answer_text = result_data.get("answer", "")
-        blocks = result_data.get("blocks", [])
-        status = result_data.get("status", "SUCCESS")
+        engine = InsuranceRAGEngine(task_name=task_name)
+        final_state: dict = {}
 
-        yield f"data: {json.dumps({'step': 3, 'label': '✍️ 3단계: 보상 산출 결과 및 UI 블록 카드 생성 완료', 'progress': 100}, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.05)
+        if is_followup:
+            print(f"⚡ [Fast Path] 이전 대화 맥락 발견! 1.5초 초고속 패스트트랙 대화 모드 실행 (질문: {query})")
+            fast_node_logs = [
+                {"node": "task_planner", "duration_ms": 50, "timestamp": datetime.datetime.now().isoformat(), "tasks": [{"seq": 1, "task_name": "이전 대화 맥락 기반 자연어 질의응답", "worker_mode": "LLM_ONLY"}]},
+                {"node": "generate", "duration_ms": 250, "timestamp": datetime.datetime.now().isoformat()}
+            ]
+            node_event_payload = json.dumps({
+                "progress_node": "generate",
+                "node_logs": fast_node_logs,
+                "tasks": [{"seq": 1, "task_name": "이전 대화 맥락 기반 자연어 질의응답", "worker_mode": "LLM_ONLY"}],
+                "intent": "대화_맥락_연속질의",
+                "is_valid": True,
+                "status": "RUNNING"
+            }, ensure_ascii=False)
+            yield f"data: {node_event_payload}\n\n"
 
-        # 2. 텍스트 스트리밍 전송 (chunk 단위)
-        chunk_size = 5
+            # 1-2. Fast LLM Contextual Stream Generation with History Buffer
+            history_text = "\n".join([f"{h.get('role', 'user')}: {h.get('content', '')}" for h in current_meta.get("chat_history", [])[-6:]])
+            try:
+                llm = engine._get_llm("response", json_mode=False)
+                prompt_text = f"다음은 대화 이력입니다:\n{history_text}\n\n이전 질문: {prev_query}\n이전 답변: {prev_answer[:600]}\n\n사용자 후속 질문: {query}\n\n이전 대화 맥락을 기억하여 친절하게 답변하세요."
+                res = await llm.ainvoke(prompt_text)
+                answer_text = res.content if hasattr(res, "content") else str(res)
+            except Exception:
+                answer_text = f"네, 이전 질의({prev_query}) 맥락에 따라 답변해 드립니다."
+
+            blocks = []  # 연속 대화에서는 무거운 UI 블록을 생략하고 대화형 버블로 출력
+            final_state = {
+                "generation": answer_text,
+                "blocks": [],
+                "layout_mode": "CONVERSATIONAL",
+                "tasks_list": [{"seq": 1, "task_name": "이전 대화 맥락 기반 자연어 질의응답", "worker_mode": "LLM_ONLY"}],
+                "intent": "대화_맥락_연속질의",
+                "is_valid": True,
+                "documents": [],
+                "node_logs": fast_node_logs
+            }
+        else:
+            # 1. 노드 단위 실시간 비동기 스트리밍 (astream_nodes)
+            async for event in engine.astream_nodes(query):
+                for node_name, state_update in event.items():
+                    final_state.update(state_update)
+                    logs = final_state.get("node_logs") or []
+                    
+                    node_event_payload = json.dumps({
+                        "progress_node": node_name,
+                        "node_logs": logs,
+                        "tasks": final_state.get("tasks_list", []),
+                        "intent": final_state.get("intent", ""),
+                        "is_valid": final_state.get("is_valid", True),
+                        "status": "OUT_OF_SCOPE" if final_state.get("is_valid") is False else ("SLOT_FILLING" if final_state.get("missing_slots") else "RUNNING")
+                    }, ensure_ascii=False)
+                    yield f"data: {node_event_payload}\n\n"
+
+        answer_text = final_state.get("generation", "")
+        blocks = final_state.get("blocks", [])
+        layout_mode = final_state.get("layout_mode", "DEEP_AUDIT" if blocks else "CONVERSATIONAL")
+
+        # 2. 글자 단위 스트리밍 애니메이션 전송 (타자기처럼 촤르르 노출)
+        chunk_size = 2
         for i in range(0, len(answer_text), chunk_size):
             chunk = answer_text[i:i+chunk_size]
             payload = json.dumps({"content": chunk}, ensure_ascii=False)
             yield f"data: {payload}\n\n"
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.012)
 
-        # 3. 최종 구조화 UI Block payload 및 메타데이터 전송
-        final_payload_dict = {
-            "status": status,
-            "task_classification": result_data.get("task_classification", []),
-            "task_plan": result_data.get("task_plan", []),
+        # 3. 최종 구조화 UI Block payload 및 메타데이터, Node Logs 전송
+        docs = final_state.get("documents") or []
+        referenced_pages = list(set([f"{d.metadata.get('section_title', '약관')} (p.{d.metadata.get('page', '?')})" for d in docs]))
+        final_status = "OUT_OF_SCOPE" if final_state.get("is_valid") is False else ("SLOT_FILLING" if final_state.get("missing_slots") else "SUCCESS")
+
+        final_payload = json.dumps({
+            "status": final_status,
             "answer": answer_text,
-            "consultation_summary": result_data.get("consultation_summary", ""),
             "blocks": blocks,
-            "total_referenced_count": result_data.get("total_referenced_count", 0),
-            "referenced_pages": result_data.get("referenced_pages", [])
-        }
-        yield f"data: {json.dumps(final_payload_dict, ensure_ascii=False)}\n\n"
+            "layout_mode": layout_mode,
+            "total_referenced_count": len(docs),
+            "referenced_pages": referenced_pages,
+            "tasks": final_state.get("tasks_list", []),
+            "intent": final_state.get("intent", ""),
+            "node_logs": final_state.get("node_logs", [])
+        }, ensure_ascii=False)
+        yield f"data: {final_payload}\n\n"
 
-        # 2.5 최종 결과를 Session Metadata에 누적 캐싱 저장 (Summary API 및 재연결 대응)
+        # 4. 세션 대화 맥락 및 Audit Log 자동 기록 (대화 기억 윈도우)
         if session_id:
-            try:
-                update_session_state(session_id, {"final_result": final_payload_dict})
-            except Exception as save_err:
-                print(f"⚠️ 최종 결과 캐싱 실패: {save_err}")
+            chat_history = current_meta.get("chat_history", [])
+            chat_history.append({"role": "user", "content": query})
+            chat_history.append({"role": "assistant", "content": answer_text})
+            chat_history = chat_history[-10:]  # 최근 10개 맥락 유지
 
-        # 3. Audit Log 자동 기록 (DB)
+            update_session_state(session_id, {
+                "last_query": query,
+                "last_answer": answer_text,
+                "intent": final_state.get("intent", ""),
+                "chat_history": chat_history
+            })
+
         execution_time_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
-        if session_id:
-            try:
-                save_audit_log(
-                    session_id=session_id,
-                    step_name="RAG_STREAM",
-                    status="SUCCESS",
-                    input_payload={"query": query, "task_name": task_name},
-                    output_payload={
-                        "answer_summary": answer_text[:200],
-                        "referenced_count": final_payload_dict.get("total_referenced_count", 0)
-                    },
-                    execution_time_ms=execution_time_ms
-                )
-            except Exception as audit_err:
-                print(f"⚠️ 감사 로그 기록 실패: {audit_err}")
+        save_audit_log(
+            session_id=session_id or "default",
+            step_name="AGENTIC_WORKFLOW_STREAM",
+            status=final_status,
+            input_payload={"query": query, "task_name": task_name, "is_followup": is_followup},
+            output_payload={
+                "answer_summary": answer_text[:200],
+                "intent": final_state.get("intent", ""),
+                "tasks": final_state.get("tasks_list", []),
+                "nodes_count": len(final_state.get("node_logs", []))
+            },
+            execution_time_ms=execution_time_ms
+        )
 
-        # SSE 완료 신호
         yield "data: [DONE]\n\n"
+
 
     except Exception as e:
-        print(f"⚠️ RAG 스트리밍 예외 발생: {e}")
-        error_message = "\n\n⚠️ 죄송합니다. 시스템 오류가 발생하여 약관 대조 분석에 실패했습니다. 질문을 구체화하여 다시 시도해 주시길 바랍니다."
-        
-        # 1. 텍스트 스트리밍 영역에 경고 문구 추가 전달
-        yield f"data: {json.dumps({'content': error_message}, ensure_ascii=False)}\n\n"
-        
-        # 2. 프론트엔드가 가진 UI Block 템플릿 규격에 맞추어 경고(CAUTION) 블록으로 전달
-        fallback_payload = {
-            "status": "ERROR",
-            "answer": error_message,
-            "blocks": [
-                {
-                    "block_type": "CAUTION",
-                    "title": "시스템 오류 및 Fallback 안내",
-                    "content": "RAG 오케스트레이션 엔진 수행 중 에러가 감지되었습니다. 원활한 답변 작성이 어려우니 재시도해 주십시오."
-                }
-            ]
-        }
-        yield f"data: {json.dumps(fallback_payload, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
+        error_payload = json.dumps({"error": str(e)}, ensure_ascii=False)
+        yield f"data: {error_payload}\n\n"
 
 @app.get("/api/rag/stream")
-@app.get("/api/stream_agentic_rag")
-@app.get("/api/v1/chat/stream")
 async def rag_stream(
     query: str = Query(..., description="사용자 질문"),
     task_name: str = Query("jang", description="작업명 (기본: jang)"),
-    confirm: bool = Query(False, description="상담사 조사 승인 여부"),
     session_id: Optional[str] = Query(None, description="대화 세션 ID (선택)")
 ):
     return StreamingResponse(
-        sse_generator(query, task_name, session_id=session_id, confirm=confirm),
+        sse_generator(query, task_name),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -311,27 +343,6 @@ async def rag_stream(
             "X-Accel-Buffering": "no"
         }
     )
-
-
-@app.get("/api/v1/chat/summary")
-def api_get_chat_summary(session_id: str = Query(..., description="대화 세션 ID")):
-    """저장된 세션 메타데이터에서 4단계 최종 산출 결과를 가져와 반환합니다."""
-    session_info = get_session_state(session_id)
-    if not session_info:
-        raise HTTPException(status_code=404, detail="해당 세션을 찾을 수 없습니다.")
-    
-    metadata = session_info.get("metadata", {})
-    final_result = metadata.get("final_result")
-    
-    if not final_result:
-        raise HTTPException(status_code=404, detail="최종 산출 결과가 생성되지 않았거나 진행 중인 세션입니다.")
-        
-    return {
-        "status": "success",
-        "session_id": session_id,
-        "result": final_result
-    }
-
 
 if __name__ == "__main__":
     import uvicorn

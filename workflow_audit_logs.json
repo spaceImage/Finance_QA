@@ -1,0 +1,793 @@
+[
+  {
+    "session_id": "d2aed508-9d4e-48a2-9b77-732e50d58719",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "재해골절 시 얼마 나오나요?",
+      "task_name": "jang"
+    },
+    "output_payload": {
+      "answer_summary": "요약: 장석찬님이 가입한 재해치료특약(특약가입금액 1,000만원)은 ‘재해골절’ 발생 시 특약가입금액의 3%를 재해골절 1회당 지급합니다. 따라서 지급액은 1,000만원 × 3% = 300,000원(동일 재해로 인한 복합골절일 경우 1회만 지급, 치아파절은 보상 제외). 지급 확정에는 사고일의 특약 효력·재해 인정 여부·골절 부위(KCD 분류)가 약관 별표",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        "보험증권 조회",
+        "가입 특약 확인",
+        "재해골절 보장내용 파악",
+        "보험금 계산"
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 44528,
+    "timestamp": "2026-08-06T02:18:54Z"
+  },
+  {
+    "session_id": "24e39c8b-1fb0-4a63-8c88-f6f7e22fdf0b",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "재해골절 시 얼마 나오나요?",
+      "task_name": "jang"
+    },
+    "output_payload": {
+      "answer_summary": "지급 가능합니다. 무재해치료특약 가입금액 1,000만원의 재해골절 급여금은 ‘특약 가입금액의 3%’로 규정되어 있어 1,000만원 × 3% = 300,000원이 예상지급액입니다. 단, 약관상 치아파절은 보상대상에서 제외되며, 동일 재해로 여러 골절이 발생한 경우 복합골절이라도 1회만 지급됩니다. 지급요건(특약의 보험기간 내 발생, 골절을 입증하는 진단서·영",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        "보험증권 조회",
+        "가입 특약 확인",
+        "재해골절 보장내용 파악",
+        "보험금 계산"
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 60480,
+    "timestamp": "2026-08-06T02:23:17Z"
+  },
+  {
+    "session_id": "814bae82-6813-4de0-b802-7d30d4f019c9",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "OUT_OF_SCOPE",
+    "input_payload": {
+      "query": "삼성생명은 왜 보험료가 비싼가요?",
+      "task_name": "jang"
+    },
+    "output_payload": {
+      "answer_summary": "현재 시스템은 보험증권 및 보험약관을 기반으로 보장 내용과 보험금을 계산해 드리고 있습니다. 문의하신 내용은 지원 범위를 벗어나 정확한 안내가 어렵습니다.",
+      "intent": "",
+      "tasks": [
+        "보험증권 조회",
+        "가입 특약 확인",
+        "보험료 구성 항목 분석",
+        "보험료 비교 분석"
+      ],
+      "nodes_count": 3
+    },
+    "execution_time_ms": 4726,
+    "timestamp": "2026-08-06T02:25:22Z"
+  },
+  {
+    "session_id": "1864c1c4-2ce2-4577-899b-accfc17d13fc",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "OUT_OF_SCOPE",
+    "input_payload": {
+      "query": "비싸",
+      "task_name": "jang"
+    },
+    "output_payload": {
+      "answer_summary": "현재 시스템은 보험증권 및 보험약관을 기반으로 보장 내용과 보험금을 계산해 드리고 있습니다. 문의하신 내용은 지원 범위를 벗어나 정확한 안내가 어렵습니다.",
+      "intent": "",
+      "tasks": [
+        "보험료 합계 확인",
+        "가입 특약 확인",
+        "비용 대비 보장 내용 분석"
+      ],
+      "nodes_count": 3
+    },
+    "execution_time_ms": 4541,
+    "timestamp": "2026-08-06T02:25:53Z"
+  },
+  {
+    "session_id": "88c14773-0912-4ce6-9c42-4c17a3794cec",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "OUT_OF_SCOPE",
+    "input_payload": {
+      "query": "뭘 봐",
+      "task_name": "jang"
+    },
+    "output_payload": {
+      "answer_summary": "현재 시스템은 보험증권 및 보험약관을 기반으로 보장 내용과 보험금을 계산해 드리고 있습니다. 문의하신 내용은 지원 범위를 벗어나 정확한 안내가 어렵습니다.",
+      "intent": "",
+      "tasks": [],
+      "nodes_count": 3
+    },
+    "execution_time_ms": 3723,
+    "timestamp": "2026-08-06T02:26:02Z"
+  },
+  {
+    "session_id": "c216230f-262a-44c7-8f36-fc7db034401b",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "재해골절 시 얼마 나오나요?",
+      "task_name": "jang"
+    },
+    "output_payload": {
+      "answer_summary": "요약: 재해골절이 인정되면 지급액은 300,000원입니다. 계산 근거: 무재해치료특약 가입금액 1,000만원 × 재해골절 지급비율 3% = 300,000원. 다만 지급 여부는 (1) 사고일이 특약 보험기간 내인지, (2) 골절 부위가 약관상의 ‘재해골절(치아파절 제외)’ 분류에 해당하는지, (3) 동일 재해로 복수 골절(복합골절)이면 1회만 지급되는 점, ",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        "보험증권 조회",
+        "가입 특약 확인",
+        "재해골절 보장내용 파악",
+        "보험금 계산"
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 51100,
+    "timestamp": "2026-08-06T02:28:03Z"
+  },
+  {
+    "session_id": "9626efae-069b-4dc9-a6e0-4db815643912",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "대장점막내암 진단 후 10일 입원 시 보상금은?",
+      "task_name": "jang"
+    },
+    "output_payload": {
+      "answer_summary": "요약: 대장점막내암 진단 후 10일 입원의 경우, 특정질병입원(또는 암입원) 특약의 지급기준에 따라 ‘입원일수 − 최초 3일’ 방식으로 계산되어 7일분 × 20,000원 = 140,000원이 예상 지급액입니다. 다만 특약이事故 당시 유효(보험기간·보험료 납입 정상), 보장개시일 경과, 계약전알릴의무 위반 없음 등이 전제되어야 하며, 청구시 진단서·입원증명서",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        "보험증권 조회",
+        "가입 특약 확인",
+        "약관 검색 및 지급 조건 파악",
+        "보험금 계산"
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 65115,
+    "timestamp": "2026-08-06T02:32:58Z"
+  },
+  {
+    "session_id": "356d3917-764a-4ffa-8449-d62fd10ff7ed",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "OUT_OF_SCOPE",
+    "input_payload": {
+      "query": "삼성생명은 왜 보험료가 비싼가요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "현재 시스템은 보험증권 및 보험약관을 기반으로 보장 내용과 보험금을 계산해 드리고 있습니다. 문의하신 내용은 지원 범위를 벗어나 정확한 안내가 어렵습니다.",
+      "intent": "",
+      "tasks": [
+        {
+          "seq": 1,
+          "task_name": "개인 가입증권 특약 및 보장 한도 조회",
+          "worker_mode": "RAG_ONLY",
+          "description": "가입증권 파일에서 유효 특약 목록 및 가입금액 추출"
+        },
+        {
+          "seq": 2,
+          "task_name": "약관 보장 대상 및 지급 예외 조항 대조",
+          "worker_mode": "RAG_LLM",
+          "description": "Vector DB 약관 검색 및 LLM 대조로 지급 조건 확인"
+        },
+        {
+          "seq": 3,
+          "task_name": "약관 기반 보상 금액 및 감액/면책 정밀 계산",
+          "worker_mode": "LLM_ONLY",
+          "description": "가입금액 x 지급 비율 기반 최종 보상금 수학적 계산"
+        }
+      ],
+      "nodes_count": 3
+    },
+    "execution_time_ms": 8017,
+    "timestamp": "2026-08-06T02:43:43Z"
+  },
+  {
+    "session_id": "6b6823f2-736d-4dd9-99a9-8b4fb438f19e",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "OUT_OF_SCOPE",
+    "input_payload": {
+      "query": "삼성생명은 왜 보험료가 비싼가요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "현재 시스템은 보험증권 및 보험약관을 기반으로 보장 내용과 보험금을 계산해 드리고 있습니다. 문의하신 내용은 지원 범위를 벗어나 정확한 안내가 어렵습니다.",
+      "intent": "",
+      "tasks": [],
+      "nodes_count": 2
+    },
+    "execution_time_ms": 5118,
+    "timestamp": "2026-08-06T02:44:28Z"
+  },
+  {
+    "session_id": "6dca3cd8-bc6e-4fcd-8c52-a3cb4b63a19d",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "OUT_OF_SCOPE",
+    "input_payload": {
+      "query": "삼성생명은 왜 보험료가 비싼가요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "현재 시스템은 보험증권 및 보험약관을 기반으로 보장 내용과 보험금을 계산해 드리고 있습니다. 문의하신 내용은 지원 범위를 벗어나 정확한 안내가 어렵습니다.",
+      "intent": "",
+      "tasks": [],
+      "nodes_count": 2
+    },
+    "execution_time_ms": 4680,
+    "timestamp": "2026-08-06T02:47:13Z"
+  },
+  {
+    "session_id": "4125f904-9b4a-4bc6-b9c0-ed96e5450a92",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "OUT_OF_SCOPE",
+    "input_payload": {
+      "query": "삼성생명은 왜 보험료가 비싼가요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "현재 시스템은 보험증권 및 보험약관을 기반으로 보장 내용과 보험금을 계산해 드리고 있습니다. 문의하신 내용은 지원 범위를 벗어나 정확한 안내가 어렵습니다.",
+      "intent": "",
+      "tasks": [],
+      "nodes_count": 2
+    },
+    "execution_time_ms": 4706,
+    "timestamp": "2026-08-06T02:49:50Z"
+  },
+  {
+    "session_id": "dec0aefe-1d28-48d1-9400-e93a081cab29",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "재해골절 시 얼마 나오나요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "장석찬 고객님의 재해골절 시 보험금 지급 가능 여부 및 금액은 무재해치료특약에 따라 1회당 30만원이 지급됩니다. 다만, 치아파절은 보상 대상에서 제외되므로 관련 진단서 확인이 필요합니다.",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        {
+          "seq": 1,
+          "task_name": "개인 가입증권 특약 및 보장 한도 조회",
+          "worker_mode": "RAG_ONLY",
+          "description": "가입증권 파일에서 유효 특약 목록 및 가입금액 추출"
+        },
+        {
+          "seq": 2,
+          "task_name": "약관 보장 대상 및 지급 예외 조항 대조",
+          "worker_mode": "RAG_LLM",
+          "description": "Vector DB 약관 검색 및 LLM 대조로 지급 조건 확인"
+        },
+        {
+          "seq": 3,
+          "task_name": "약관 기반 보상 금액 및 감액/면책 정밀 계산",
+          "worker_mode": "LLM_ONLY",
+          "description": "가입금액 x 지급 비율 기반 최종 보상금 수학적 계산"
+        }
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 15861,
+    "timestamp": "2026-08-06T02:50:10Z"
+  },
+  {
+    "session_id": "88c7dd96-a46e-4283-b666-0479b5724b63",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "재해골절 시 얼마 나오나요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "장석찬 고객님의 재해골절 시 보험금 지급 가능 여부 및 금액은 무재해치료특약에 따라 1회당 30만원이 지급됩니다. 다만, 치아파절은 보상 대상에서 제외되므로 주의가 필요합니다.\n\n> ⚠️ **상담 시 유의사항**\n> 치아파절(치아 부러짐)은 약관상 보상 대상 골절에서 제외되므로 소견서상 제외 유무 확인 필요.",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        {
+          "seq": 1,
+          "task_name": "개인 가입증권 특약 및 보장 한도 조회",
+          "worker_mode": "RAG_ONLY",
+          "description": "가입증권 파일에서 유효 특약 목록 및 가입금액 추출"
+        },
+        {
+          "seq": 2,
+          "task_name": "약관 보장 대상 및 지급 예외 조항 대조",
+          "worker_mode": "RAG_LLM",
+          "description": "Vector DB 약관 검색 및 LLM 대조로 지급 조건 확인"
+        },
+        {
+          "seq": 3,
+          "task_name": "약관 기반 보상 금액 및 감액/면책 정밀 계산",
+          "worker_mode": "LLM_ONLY",
+          "description": "가입금액 x 지급 비율 기반 최종 보상금 수학적 계산"
+        }
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 16073,
+    "timestamp": "2026-08-06T02:54:52Z"
+  },
+  {
+    "session_id": "844b1a91-95c7-481a-b229-8b94fd923393",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "재해골절 시 얼마 나오나요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "장석찬 고객님의 재해골절 시 보험금 지급 가능 여부 및 금액은 무재해치료특약에 따라 1회당 30만원이 지급됩니다. 다만, 치아파절은 보상 대상에서 제외되므로 관련 진단서 확인이 필요합니다.\n\n> ⚠️ **상담 시 유의사항**\n> 치아파절(치아 부러짐)은 약관상 보상 대상 골절에서 제외되므로 소견서상 제외 유무 확인 필요.",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        {
+          "seq": 1,
+          "task_name": "개인 가입증권 특약 및 보장 한도 조회",
+          "worker_mode": "RAG_ONLY",
+          "description": "가입증권 파일에서 유효 특약 목록 및 가입금액 추출"
+        },
+        {
+          "seq": 2,
+          "task_name": "약관 보장 대상 및 지급 예외 조항 대조",
+          "worker_mode": "RAG_LLM",
+          "description": "Vector DB 약관 검색 및 LLM 대조로 지급 조건 확인"
+        },
+        {
+          "seq": 3,
+          "task_name": "약관 기반 보상 금액 및 감액/면책 정밀 계산",
+          "worker_mode": "LLM_ONLY",
+          "description": "가입금액 x 지급 비율 기반 최종 보상금 수학적 계산"
+        }
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 18952,
+    "timestamp": "2026-08-06T02:57:58Z"
+  },
+  {
+    "session_id": "0b655ddf-7e60-4811-8176-958da2829ff3",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "재해골절 시 얼마 나오나요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "재해골절 발생 시 지급보험금은 특약보험가입금액 1,000만원의 3%로 1회당 300,000원입니다. 지급 요건은 약관상 ‘재해골절’ 정의에 해당해야 하고(치아파절 제외), 동일 재해로 인한 복합골절인 경우에도 1회만 지급됩니다. 보험금 청구 시 골절진단서(또는 사고증명서), 진료기록·영수증 등 제출이 필요하며, 서류 접수 후 통상 3영업일 이내 지급(조사 ",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        {
+          "seq": 1,
+          "task_name": "개인 가입증권 특약 및 보장 한도 조회",
+          "worker_mode": "RAG_ONLY",
+          "description": "가입증권 파일에서 유효 특약 목록 및 가입금액 추출"
+        },
+        {
+          "seq": 2,
+          "task_name": "약관 보장 대상 및 지급 예외 조항 대조",
+          "worker_mode": "RAG_LLM",
+          "description": "Vector DB 약관 검색 및 LLM 대조로 지급 조건 확인"
+        },
+        {
+          "seq": 3,
+          "task_name": "약관 기반 보상 금액 및 감액/면책 정밀 계산",
+          "worker_mode": "LLM_ONLY",
+          "description": "가입금액 x 지급 비율 기반 최종 보상금 수학적 계산"
+        }
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 29735,
+    "timestamp": "2026-08-06T03:01:53Z"
+  },
+  {
+    "session_id": "4e280136-f6c0-4dea-9278-3fdcab23994f",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "OUT_OF_SCOPE",
+    "input_payload": {
+      "query": "삼성생명은 왜 보험료가 비싼가요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "현재 시스템은 보험증권 및 보험약관을 기반으로 보장 내용과 보험금을 계산해 드리고 있습니다. 문의하신 내용은 지원 범위를 벗어나 정확한 안내가 어렵습니다.",
+      "intent": "",
+      "tasks": [],
+      "nodes_count": 2
+    },
+    "execution_time_ms": 6080,
+    "timestamp": "2026-08-06T03:02:37Z"
+  },
+  {
+    "session_id": "098dfc63-73b8-427a-98c0-881e4c50812d",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "재해골절 시 얼마 나오나요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "요약: 고객님의 무재해치료특약(보험가입금액 1,000만원)에서 ‘재해골절’은 특약가입금액의 3%를 1회당 지급하므로, 지급예상액은 1,000만원 × 3% = 300,000원입니다(조건: 재해로 인한 골절임이 의학적 소견서로 확인되어야 하며, 동일 재해의 복합골절은 1회만 지급). 청구를 위해 진단서(골절진단서) 및 영수증 등 제출 필요하며, 서류 접수 후 ",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        {
+          "seq": 1,
+          "task_name": "개인 가입증권 특약 및 보장 한도 조회",
+          "worker_mode": "RAG_ONLY",
+          "description": "가입증권 파일에서 유효 특약 목록 및 가입금액 추출"
+        },
+        {
+          "seq": 2,
+          "task_name": "약관 보장 대상 및 지급 예외 조항 대조",
+          "worker_mode": "RAG_LLM",
+          "description": "Vector DB 약관 검색 및 LLM 대조로 지급 조건 확인"
+        },
+        {
+          "seq": 3,
+          "task_name": "약관 기반 보상 금액 및 감액/면책 정밀 계산",
+          "worker_mode": "LLM_ONLY",
+          "description": "가입금액 x 지급 비율 기반 최종 보상금 수학적 계산"
+        }
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 28556,
+    "timestamp": "2026-08-06T03:03:08Z"
+  },
+  {
+    "session_id": "5335d9bc-c409-47b4-bdd8-4329154a5c7d",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "재해골절 시 얼마 나오나요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "## 📊 손해사정 보상금 산출 요약\n\n| 보장 항목 | 가입 특약/조항 | 가입 금액 | 지급 비율 | 예상 지급금 |\n| :--- | :--- | :---: | :---: | :---: |\n| 재해골절 치료비 | 재해치료비보장특약(무재해치료특약) 제12·13조 | 1,000만원 | 3% (재해골절 발생 1회당) | 300,000원 |\n\n> 💰 **최종 예",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        {
+          "seq": 1,
+          "task_name": "개인 가입증권 특약 및 보장 한도 조회",
+          "worker_mode": "RAG_ONLY",
+          "description": "가입증권 파일에서 유효 특약 목록 및 가입금액 추출"
+        },
+        {
+          "seq": 2,
+          "task_name": "약관 보장 대상 및 지급 예외 조항 대조",
+          "worker_mode": "RAG_LLM",
+          "description": "Vector DB 약관 검색 및 LLM 대조로 지급 조건 확인"
+        },
+        {
+          "seq": 3,
+          "task_name": "약관 기반 보상 금액 및 감액/면책 정밀 계산",
+          "worker_mode": "LLM_ONLY",
+          "description": "가입금액 x 지급 비율 기반 최종 보상금 수학적 계산"
+        }
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 38179,
+    "timestamp": "2026-08-06T03:04:45Z"
+  },
+  {
+    "session_id": "414b33c9-f23a-4e22-b614-f63b783bf124",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "재해골절 시 얼마 나오나요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "## 📊 손해사정 보상금 산출 요약\n\n| 보장 항목 | 가입 특약/조항 | 가입 금액 | 지급 비율 | 예상 지급금 |\n| :--- | :--- | :--- | :--- | :--- |\n| 재해골절 치료비 | 재해치료비보장특약(갱신형, 무배당) - 별표1(재해골절급여금) | 10,000,000원 (특약 가입금액: 1,000만원) | 3% (특약가입금액의 3",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        {
+          "seq": 1,
+          "task_name": "개인 가입증권 특약 및 보장 한도 조회",
+          "worker_mode": "RAG_ONLY",
+          "description": "가입증권 파일에서 유효 특약 목록 및 가입금액 추출"
+        },
+        {
+          "seq": 2,
+          "task_name": "약관 보장 대상 및 지급 예외 조항 대조",
+          "worker_mode": "RAG_LLM",
+          "description": "Vector DB 약관 검색 및 LLM 대조로 지급 조건 확인"
+        },
+        {
+          "seq": 3,
+          "task_name": "약관 기반 보상 금액 및 감액/면책 정밀 계산",
+          "worker_mode": "LLM_ONLY",
+          "description": "가입금액 x 지급 비율 기반 최종 보상금 수학적 계산"
+        }
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 37886,
+    "timestamp": "2026-08-06T03:06:31Z"
+  },
+  {
+    "session_id": "2eae220d-2466-4c78-9fe0-33b3a83f7475",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "재해골절 시 얼마 나오나요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "## 📊 손해사정 보상금 산출 요약\n\n| 보장 항목 | 가입 특약/조항 | 가입 금액 | 지급 비율 | 예상 지급금 |\n| :--- | :--- | :--- | :--- | :--- |\n| 재해골절 치료비 | 재해치료비보장특약(갱신형, 무배당) / 별표1·제13조 | 1,000만원 | 3% (재해골절 1회당, 동일재해 복합골절 시 1회만) | 300,000",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        {
+          "seq": 1,
+          "task_name": "개인 가입증권 특약 및 보장 한도 조회",
+          "worker_mode": "RAG_ONLY",
+          "description": "가입증권 파일에서 유효 특약 목록 및 가입금액 추출"
+        },
+        {
+          "seq": 2,
+          "task_name": "약관 보장 대상 및 지급 예외 조항 대조",
+          "worker_mode": "RAG_LLM",
+          "description": "Vector DB 약관 검색 및 LLM 대조로 지급 조건 확인"
+        },
+        {
+          "seq": 3,
+          "task_name": "약관 기반 보상 금액 및 감액/면책 정밀 계산",
+          "worker_mode": "LLM_ONLY",
+          "description": "가입금액 x 지급 비율 기반 최종 보상금 수학적 계산"
+        }
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 40212,
+    "timestamp": "2026-08-06T03:08:22Z"
+  },
+  {
+    "session_id": "23da7e6a-3536-48c1-a914-f989500c7136",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "OUT_OF_SCOPE",
+    "input_payload": {
+      "query": "삼성생명은 왜 보험료가 비싼가요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "현재 시스템은 보험증권 및 보험약관을 기반으로 보장 내용과 보험금을 계산해 드리고 있습니다. 문의하신 내용은 지원 범위를 벗어나 정확한 안내가 어렵습니다.",
+      "intent": "",
+      "tasks": [],
+      "nodes_count": 2
+    },
+    "execution_time_ms": 5120,
+    "timestamp": "2026-08-06T03:09:30Z"
+  },
+  {
+    "session_id": "6ef76944-b852-4ad6-b1b9-b29a92e5f0b1",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "재해골절 시 얼마 나오나요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "## 📊 약관 보장 기준 및 지급 비율 요약\n\n| 보장 항목 | 가입 특약/조항 | 가입 금액 | 약관 보장 기준 및 지급 비율 | 비고/제한사항 |\n| :--- | :--- | :---: | :--- | :--- |\n| 재해골절(재해로 인한 골절) | 재해치료비보장특약 제12조 / 별표1·3 | 1,000만원 (무재해치료특약) | 특약 가입금액의 3% 지",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        {
+          "seq": 1,
+          "task_name": "개인 가입증권 특약 및 보장 한도 조회",
+          "worker_mode": "RAG_ONLY",
+          "description": "가입증권 파일에서 유효 특약 목록 및 가입금액 추출"
+        },
+        {
+          "seq": 2,
+          "task_name": "약관 보장 대상 및 지급 예외 조항 대조",
+          "worker_mode": "RAG_LLM",
+          "description": "Vector DB 약관 검색 및 LLM 대조로 지급 조건 확인"
+        },
+        {
+          "seq": 3,
+          "task_name": "약관 기반 보상 금액 및 감액/면책 정밀 계산",
+          "worker_mode": "LLM_ONLY",
+          "description": "가입금액 x 지급 비율 기반 최종 보상금 수학적 계산"
+        }
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 33391,
+    "timestamp": "2026-08-06T03:10:10Z"
+  },
+  {
+    "session_id": "09d85370-594e-4de8-8812-7a93e84ab223",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "OUT_OF_SCOPE",
+    "input_payload": {
+      "query": "삼성생명은 왜 보험료가 비싼가요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "현재 시스템은 보험증권 및 보험약관을 기반으로 보장 내용과 보험금을 계산해 드리고 있습니다. 문의하신 내용은 지원 범위를 벗어나 정확한 안내가 어렵습니다.",
+      "intent": "",
+      "tasks": [],
+      "nodes_count": 2
+    },
+    "execution_time_ms": 5530,
+    "timestamp": "2026-08-06T03:12:56Z"
+  },
+  {
+    "session_id": "4ef4f36b-7548-4063-84dc-de93a321d8ec",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "재해골절 시 얼마 나오나요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "## 📊 약관 보장 기준 및 지급 비율 요약\n\n| 보장 항목 | 가입 특약/조항 | 가입 금액 | 약관 보장 규정 및 지급 비율(%) | 비고/제한사항 |\n| :--- | :--- | :--- | :--- | :--- |\n| 재해골절 치료비 | 재해치료비보장특약(갱신형, 무배당) 제12조 / 별표1 | 특약 가입금액 (증권 확인 필요) | 가입금액의 3% ",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        {
+          "seq": 1,
+          "task_name": "개인 가입증권 특약 및 보장 한도 조회",
+          "worker_mode": "RAG_ONLY",
+          "description": "가입증권 파일에서 유효 특약 목록 및 가입금액 추출"
+        },
+        {
+          "seq": 2,
+          "task_name": "약관 보장 대상 및 지급 예외 조항 대조",
+          "worker_mode": "RAG_LLM",
+          "description": "Vector DB 약관 검색 및 LLM 대조로 지급 조건 확인"
+        },
+        {
+          "seq": 3,
+          "task_name": "약관 기반 보상 금액 및 감액/면책 정밀 계산",
+          "worker_mode": "LLM_ONLY",
+          "description": "가입금액 x 지급 비율 기반 최종 보상금 수학적 계산"
+        }
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 53505,
+    "timestamp": "2026-08-06T03:14:47Z"
+  },
+  {
+    "session_id": "ce20954d-232d-49a8-ae64-b3ad33e2bda9",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "OUT_OF_SCOPE",
+    "input_payload": {
+      "query": "삼성생명은 왜 보험료가 비싼가요?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "현재 시스템은 보험증권 및 보험약관을 기반으로 보장 내용과 보험금을 계산해 드리고 있습니다. 문의하신 내용은 지원 범위를 벗어나 정확한 안내가 어렵습니다.",
+      "intent": "",
+      "tasks": [],
+      "nodes_count": 2
+    },
+    "execution_time_ms": 5660,
+    "timestamp": "2026-08-06T03:15:04Z"
+  },
+  {
+    "session_id": "3a7fc338-bc85-4f10-a283-af13ade13195",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "갑상선암 진단 시 보장 금액은?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "| 보장 항목 | 가입 특약/조항 | 가입 금액 | 약관 보장 규정 및 지급 비율(%) | 비고/제한사항 |\n| :--- | :--- | :--- | :--- | :--- |\n| 갑상선암(중대한암) 진단확정 | 무CI두번특약 (CI 두번 보장) | 특약 약정 정액 (증권 기재) | 특약 약정 정액 1회 지급(최초 CI 해당 시). 두번째 CI 발생요건 충족",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        {
+          "seq": 1,
+          "task_name": "개인 가입증권 특약 및 보장 한도 조회",
+          "worker_mode": "RAG_ONLY",
+          "description": "가입증권 파일에서 유효 특약 목록 및 가입금액 추출"
+        },
+        {
+          "seq": 2,
+          "task_name": "약관 보장 대상 및 지급 예외 조항 대조",
+          "worker_mode": "RAG_LLM",
+          "description": "Vector DB 약관 검색 및 LLM 대조로 지급 조건 확인"
+        },
+        {
+          "seq": 3,
+          "task_name": "약관 기반 보상 금액 및 감액/면책 정밀 계산",
+          "worker_mode": "LLM_ONLY",
+          "description": "가입금액 x 지급 비율 기반 최종 보상금 수학적 계산"
+        }
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 84796,
+    "timestamp": "2026-08-06T03:16:32Z"
+  },
+  {
+    "session_id": "fc0ca3a6-ae79-4e52-8f42-b9bf3697d284",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "SUCCESS",
+    "input_payload": {
+      "query": "대장점막내암 진단 후 10일 입원 시 보상금은?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "## 📊 약관 보장 기준 및 지급 비율 요약\n\n| 보장 항목 | 가입 특약/조항 | 가입 금액 | 약관 보장 규정 및 지급 비율(%) | 비고/제한사항 |\n| :--- | :--- | :--- | :--- | :--- |\n| 대장점막내암 입원급여금 | 암치료비특약 / 특정질병입원특약 (제17조·제19조 등) | 약관상 일당 정액(약관별표1에 명시된 일당) ",
+      "intent": "보험금_지급_여부",
+      "tasks": [
+        {
+          "seq": 1,
+          "task_name": "개인 가입증권 특약 및 보장 한도 조회",
+          "worker_mode": "RAG_ONLY",
+          "description": "가입증권 파일에서 유효 특약 목록 및 가입금액 추출"
+        },
+        {
+          "seq": 2,
+          "task_name": "약관 보장 대상 및 지급 예외 조항 대조",
+          "worker_mode": "RAG_LLM",
+          "description": "Vector DB 약관 검색 및 LLM 대조로 지급 조건 확인"
+        },
+        {
+          "seq": 3,
+          "task_name": "약관 기반 보상 금액 및 감액/면책 정밀 계산",
+          "worker_mode": "LLM_ONLY",
+          "description": "가입금액 x 지급 비율 기반 최종 보상금 수학적 계산"
+        }
+      ],
+      "nodes_count": 8
+    },
+    "execution_time_ms": 58323,
+    "timestamp": "2026-08-06T03:18:01Z"
+  },
+  {
+    "session_id": "71177d96-ca65-4ef4-bf0f-0a4f59d0aa07",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "OUT_OF_SCOPE",
+    "input_payload": {
+      "query": "그러면 대장점막내암인데 여기서 뭔가 내가 다른 실손있으면 달라지나?",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "현재 시스템은 보험증권 및 보험약관을 기반으로 보장 내용과 보험금을 계산해 드리고 있습니다. 문의하신 내용은 지원 범위를 벗어나 정확한 안내가 어렵습니다.",
+      "intent": "",
+      "tasks": [],
+      "nodes_count": 2
+    },
+    "execution_time_ms": 3764,
+    "timestamp": "2026-08-06T03:18:29Z"
+  },
+  {
+    "session_id": "fee90735-7cd8-4840-bf87-0b631129b6ba",
+    "step_name": "AGENTIC_WORKFLOW_STREAM",
+    "status": "OUT_OF_SCOPE",
+    "input_payload": {
+      "query": "그러면 대장점막내암인데 여기서 뭔가 내가 다른 실손있으면 달라지나? -> 이거 왜 차단해? 아니 내 보험에서 단독 보장이 아니라 실손이랑 다른 보험에 같은거 있으면은 어떻다는거죠",
+      "task_name": "jang",
+      "is_followup": false
+    },
+    "output_payload": {
+      "answer_summary": "현재 시스템은 보험증권 및 보험약관을 기반으로 보장 내용과 보험금을 계산해 드리고 있습니다. 문의하신 내용은 지원 범위를 벗어나 정확한 안내가 어렵습니다.",
+      "intent": "",
+      "tasks": [],
+      "nodes_count": 2
+    },
+    "execution_time_ms": 4124,
+    "timestamp": "2026-08-06T03:18:50Z"
+  }
+]

@@ -142,7 +142,33 @@ def save_audit_log(
     output_payload: Optional[dict] = None,
     execution_time_ms: int = 0
 ) -> Optional[dict]:
-    """RAG 오케스트레이터 각 단계(S1~S4)의 실행 이력을 audit_logs 테이블에 기록합니다."""
+    """RAG 오케스트레이터 각 단계의 실행 이력을 audit_logs 테이블 및 파일(workflow_audit_logs.json)에 기록합니다."""
+    # 1. 파일 로그 기록
+    try:
+        log_entry = {
+            "session_id": session_id,
+            "step_name": step_name,
+            "status": status,
+            "input_payload": input_payload or {},
+            "output_payload": output_payload or {},
+            "execution_time_ms": execution_time_ms,
+            "timestamp": os.getenv("CURRENT_TIME", None) or os.popen("date -u +'%Y-%m-%dT%H:%M:%SZ'").read().strip()
+        }
+        log_file = "workflow_audit_logs.json"
+        logs = []
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, "r", encoding="utf-8") as f:
+                    logs = json.load(f)
+            except Exception:
+                logs = []
+        logs.append(log_entry)
+        with open(log_file, "w", encoding="utf-8") as f:
+            json.dump(logs, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ 파일 로그 기록 오류: {e}")
+
+    # 2. Supabase DB 기록
     if not session_id:
         return None
     try:
@@ -163,12 +189,24 @@ def save_audit_log(
 
 
 def get_session_audit_logs(session_id: str) -> List[dict]:
-    """특정 세션의 전체 audit_logs 이력을 생성 시각 순으로 조회합니다."""
+    """특정 세션의 전체 audit_logs 이력을 조회합니다. (DB 미연동 시 파일 로그 fallback)"""
     try:
         client = get_supabase_client()
         res = client.table("audit_logs").select("*").eq("session_id", session_id).order("created_at").execute()
-        return res.data or []
+        if res.data and len(res.data) > 0:
+            return res.data
     except Exception as e:
-        print(f"⚠️ audit_logs 조회 중 오류 발생: {e}")
-        return []
+        print(f"⚠️ audit_logs DB 조회 중 오류 발생: {e}")
+
+    # 파일 로그 Fallback
+    log_file = "workflow_audit_logs.json"
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, "r", encoding="utf-8") as f:
+                all_logs = json.load(f)
+                return [l for l in all_logs if l.get("session_id") == session_id or not session_id]
+        except Exception:
+            pass
+    return []
+
 

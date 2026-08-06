@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 export interface Citation {
   id: number;
@@ -7,16 +7,8 @@ export interface Citation {
   snippet: string;
 }
 
-export interface GroundingInfo {
-  excerpt?: string;
-  condition?: string;
-  formula?: string;
-  reasoning?: string;
-}
-
 export interface BlockItem {
   text: string;
-  grounding?: GroundingInfo;
   citations?: Citation[];
 }
 
@@ -34,66 +26,90 @@ export interface StepLog {
   timestamp: string;
 }
 
-// Phase 1 결과: 계획 수립, 상담사 승인 대기
-export interface PlanResult {
-  status: "AWAITING_CONFIRMATION";
-  taskPlan: string[];
-  taskClassification: string[];
-  answer: string;
-}
-
-// Phase 2 결과: 약관 조회 완료
-export interface AnalysisResult {
-  status: "SUCCESS" | "OUT_OF_SCOPE" | "NEED_MORE_INFO";
-  answer: string;
-  blocks: UIBlock[];
-  consultationSummary: string;
-  taskPlan: string[];
-  taskClassification: string[];
-  referencedPages: ReferencedPage[];
-}
-
-export interface ReferencedPage {
-  section_title: string;
-  page_number: number;
-  source_pdf: string;
-  full_content: string;
+export interface NodeLog {
+  node: string;
+  duration_ms: number;
+  timestamp: string;
+  [key: string]: any;
 }
 
 interface UseSSEReturn {
-  // Phase 1 (AWAITING_CONFIRMATION) state
-  planResult: PlanResult | null;
-  // Phase 2 (SUCCESS) state  
-  analysisResult: AnalysisResult | null;
-  // Shared loading/progress
+  data: string;
+  blocks: UIBlock[];
+  status: string;
   isLoading: boolean;
   isCompleted: boolean;
   progress: number;
   currentStepLabel: string;
   stepLogs: StepLog[];
+  nodeLogs: NodeLog[];
+  tasks: string[];
+  intent: string;
+  llmCalls: number;
+  loopCount: number;
   error: string | null;
   sessionId: string | null;
-  // Actions
   startStream: (query: string, taskName?: string) => Promise<void>;
-  confirmStream: (query: string, taskName?: string) => Promise<void>;
   sendSlotFill: (slotKey: string, slotValue: string, taskName?: string) => Promise<void>;
+  approveTaskPlan: (approvedTasks?: string[], taskName?: string) => Promise<void>;
   stopStream: () => void;
   resetStream: () => void;
 }
 
-export function useSSE(baseUrl: string = "http://localhost:8000"): UseSSEReturn {
-  const [planResult, setPlanResult] = useState<PlanResult | null>(null);
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
-
+export function useSSE(): UseSSEReturn {
+  const [data, setData] = useState<string>("");
+  const [blocks, setBlocks] = useState<UIBlock[]>([]);
+  const [status, setStatus] = useState<string>("SUCCESS");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
   const [progress, setProgress] = useState<number>(0);
   const [currentStepLabel, setCurrentStepLabel] = useState<string>("");
   const [stepLogs, setStepLogs] = useState<StepLog[]>([]);
+  const [nodeLogs, setNodeLogs] = useState<NodeLog[]>([]);
+  const [tasks, setTasks] = useState<string[]>([]);
+  const [intent, setIntent] = useState<string>("");
+  const [llmCalls, setLlmCalls] = useState<number>(0);
+  const [loopCount, setLoopCount] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  // 컴포넌트 마운트 시 저장된 세션 복원
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = sessionStorage.getItem("active_rag_session");
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed.sessionId) setSessionId(parsed.sessionId);
+          if (parsed.answer) setData(parsed.answer);
+          if (parsed.blocks) setBlocks(parsed.blocks);
+          if (parsed.status) setStatus(parsed.status);
+          if (parsed.nodeLogs) setNodeLogs(parsed.nodeLogs);
+          if (parsed.tasks) setTasks(parsed.tasks);
+          if (parsed.intent) setIntent(parsed.intent);
+          if (parsed.llmCalls) setLlmCalls(parsed.llmCalls);
+          if (parsed.loopCount) setLoopCount(parsed.loopCount);
+          if (parsed.stepLogs) setStepLogs(parsed.stepLogs);
+        } catch (e) {
+          console.warn("세션 복원 실패:", e);
+        }
+      }
+    }
+  }, []);
+
+  const saveToSessionStorage = (updated: Record<string, any>) => {
+    if (typeof window !== "undefined") {
+      const existing = sessionStorage.getItem("active_rag_session");
+      let currentData = {};
+      if (existing) {
+        try { currentData = JSON.parse(existing); } catch (e) {}
+      }
+      const newDump = { ...currentData, ...updated, timestamp: new Date().toISOString() };
+      sessionStorage.setItem("active_rag_session", JSON.stringify(newDump));
+    }
+  };
 
   const stopStream = useCallback(() => {
     if (eventSourceRef.current) {
@@ -105,14 +121,22 @@ export function useSSE(baseUrl: string = "http://localhost:8000"): UseSSEReturn 
 
   const resetStream = useCallback(() => {
     stopStream();
-    setPlanResult(null);
-    setAnalysisResult(null);
+    setData("");
+    setBlocks([]);
+    setStatus("SUCCESS");
     setProgress(0);
     setCurrentStepLabel("");
     setStepLogs([]);
+    setNodeLogs([]);
+    setTasks([]);
+    setIntent("");
+    setLlmCalls(0);
+    setLoopCount(0);
     setError(null);
     setIsCompleted(false);
   }, [stopStream]);
+
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   const createSession = async (taskName: string = "jang"): Promise<string | null> => {
     try {
@@ -124,6 +148,7 @@ export function useSSE(baseUrl: string = "http://localhost:8000"): UseSSEReturn 
       const resData = await res.json();
       if (resData.session_id) {
         setSessionId(resData.session_id);
+        saveToSessionStorage({ sessionId: resData.session_id });
         return resData.session_id;
       }
     } catch (e) {
@@ -132,213 +157,242 @@ export function useSSE(baseUrl: string = "http://localhost:8000"): UseSSEReturn 
     return null;
   };
 
-  // SSE 메시지 파싱 공통 핸들러
-  const buildSSEHandler = useCallback(
-    (
-      onPlan: (data: PlanResult) => void,
-      onAnalysis: (data: AnalysisResult) => void,
-      onTextChunk: (chunk: string) => void,
-    ) =>
-      (event: MessageEvent) => {
-        if (event.data === "[DONE]") {
-          setIsCompleted(true);
-          setProgress(100);
-          stopStream();
-          return;
-        }
-        try {
-          const parsed = JSON.parse(event.data);
-
-          // Step progress event
-          if (parsed.progress !== undefined && parsed.label) {
-            setProgress(parsed.progress);
-            setCurrentStepLabel(parsed.label);
-            setStepLogs((prev) => [
-              ...prev,
-              {
-                step: parsed.step || prev.length + 1,
-                label: parsed.label,
-                timestamp: new Date().toLocaleTimeString(),
-              },
-            ]);
-            return;
-          }
-
-          // Final payload with status
-          if (parsed.status) {
-            const status = parsed.status;
-
-            if (status === "AWAITING_CONFIRMATION") {
-              onPlan({
-                status: "AWAITING_CONFIRMATION",
-                taskPlan: parsed.task_plan || [],
-                taskClassification: parsed.task_classification || [],
-                answer: parsed.answer || "",
-              });
-            } else {
-              // SUCCESS / OUT_OF_SCOPE / NEED_MORE_INFO
-              onAnalysis({
-                status,
-                answer: parsed.answer || "",
-                blocks: parsed.blocks || [],
-                consultationSummary: parsed.consultation_summary || "",
-                taskPlan: parsed.task_plan || [],
-                taskClassification: parsed.task_classification || [],
-                referencedPages: parsed.referenced_pages || [],
-              });
-            }
-            setProgress(100);
-            return;
-          }
-
-          // Streaming text chunk
-          if (parsed.content) {
-            onTextChunk(parsed.content);
-          }
-        } catch {
-          onTextChunk(event.data);
-        }
-      },
-    [stopStream]
-  );
-
-  // Phase 1: 질의 분석 → AWAITING_CONFIRMATION 상태로 일시 정지
   const startStream = useCallback(
     async (query: string, taskName: string = "jang") => {
       resetStream();
       setIsLoading(true);
-      setProgress(10);
-      const initLabel = "🔮 상담 내용 분석 및 약관 조회 범위 확인 중...";
+      setProgress(15);
+      const initLabel = "🔮 1단계: 파이프라인 초기화 및 라우팅 분석 중...";
       setCurrentStepLabel(initLabel);
       setStepLogs([{ step: 1, label: initLabel, timestamp: new Date().toLocaleTimeString() }]);
 
       const activeSessionId = await createSession(taskName);
+
       const encodedQuery = encodeURIComponent(query);
-      let url = `${baseUrl}/api/rag/stream?query=${encodedQuery}&task_name=${taskName}&confirm=false`;
-      if (activeSessionId) url += `&session_id=${activeSessionId}`;
+      let url = `${baseUrl}/api/rag/stream?query=${encodedQuery}&task_name=${taskName}`;
+      if (activeSessionId) {
+        url += `&session_id=${activeSessionId}`;
+      }
+
+      let accumulatedText = "";
 
       try {
         const es = new EventSource(url);
         eventSourceRef.current = es;
 
-        let streamingText = "";
+        es.onopen = () => {
+          setIsLoading(true);
+        };
 
-        es.onmessage = buildSSEHandler(
-          (plan) => setPlanResult(plan),
-          (analysis) => setAnalysisResult(analysis),
-          (chunk) => {
-            streamingText += chunk;
+        es.onmessage = (event) => {
+          try {
+            if (event.data === "[DONE]") {
+              setIsCompleted(true);
+              setProgress(100);
+              stopStream();
+              saveToSessionStorage({ query, answer: accumulatedText, isCompleted: true });
+              return;
+            }
+
+            const parsed = JSON.parse(event.data);
+            if (parsed.progress_node) {
+              if (parsed.node_logs) {
+                setNodeLogs(parsed.node_logs);
+                const calls = parsed.node_logs.filter((n: any) =>
+                  ["task_planner", "query_validation", "intent_router", "grade_documents", "multi_hop_reasoning", "generate", "out_of_scope_response"].includes(n.node)
+                ).length;
+                setLlmCalls(calls);
+
+                const loops = parsed.node_logs.filter((n: any) => n.node === "multi_hop_reasoning" || n.node === "rewrite_query").length;
+                setLoopCount(loops);
+
+                saveToSessionStorage({
+                  sessionId: activeSessionId,
+                  query,
+                  status: parsed.status || "RUNNING",
+                  nodeLogs: parsed.node_logs || [],
+                  tasks: parsed.tasks || [],
+                  intent: parsed.intent || "",
+                  llmCalls: calls,
+                  loopCount: loops,
+                });
+              }
+              if (parsed.tasks) setTasks(parsed.tasks);
+              if (parsed.intent) setIntent(parsed.intent);
+              if (parsed.status) setStatus(parsed.status);
+            } else if (parsed.progress !== undefined) {
+              setProgress(parsed.progress);
+              if (parsed.label) {
+                setCurrentStepLabel(parsed.label);
+                setStepLogs((prev) => [
+                  ...prev,
+                  { step: parsed.step || prev.length + 1, label: parsed.label, timestamp: new Date().toLocaleTimeString() }
+                ]);
+              }
+            } else if (parsed.blocks && Array.isArray(parsed.blocks)) {
+              setBlocks(parsed.blocks);
+              if (parsed.status) setStatus(parsed.status);
+              if (parsed.node_logs) setNodeLogs(parsed.node_logs);
+              if (parsed.tasks) setTasks(parsed.tasks);
+              if (parsed.intent) setIntent(parsed.intent);
+              setProgress(100);
+
+              const calls = (parsed.node_logs || []).filter((n: any) =>
+                ["task_planner", "query_validation", "intent_router", "grade_documents", "multi_hop_reasoning", "generate", "out_of_scope_response"].includes(n.node)
+              ).length;
+              setLlmCalls(calls);
+
+              saveToSessionStorage({
+                sessionId: activeSessionId,
+                query,
+                status: parsed.status || "SUCCESS",
+                blocks: parsed.blocks,
+                nodeLogs: parsed.node_logs || [],
+                tasks: parsed.tasks || [],
+                intent: parsed.intent || "",
+                llmCalls: calls,
+              });
+            } else if (parsed.content) {
+              accumulatedText += parsed.content;
+              setData(accumulatedText);
+            }
+          } catch {
+            accumulatedText += event.data;
+            setData(accumulatedText);
           }
-        );
+        };
 
         es.onerror = () => {
           setIsCompleted(true);
           stopStream();
         };
       } catch (err: any) {
-        setError(err.message || "SSE 연결 실패");
+        setError(err.message || "SSE 스트림 연결에 실패했습니다.");
         setIsLoading(false);
       }
     },
-    [resetStream, stopStream, buildSSEHandler, baseUrl]
-  );
-
-  // Phase 2: 상담사 승인 → 약관 DB 조회 + 최종 답변 생성
-  // planResult를 유지한 채로 analysisResult만 업데이트
-  const confirmStream = useCallback(
-    async (query: string, taskName: string = "jang") => {
-      // planResult는 유지, analysis + loading 상태만 리셋
-      setAnalysisResult(null);
-      setIsLoading(true);
-      setIsCompleted(false);
-      setError(null);
-      setProgress(30);
-      const confirmLabel = "🔍 약관 DB 정밀 조회 중...";
-      setCurrentStepLabel(confirmLabel);
-      setStepLogs((prev) => [
-        ...prev,
-        { step: prev.length + 1, label: confirmLabel, timestamp: new Date().toLocaleTimeString() },
-      ]);
-
-      const encodedQuery = encodeURIComponent(query);
-      const url = `${baseUrl}/api/rag/stream?query=${encodedQuery}&task_name=${taskName}&confirm=true`;
-
-      try {
-        const es = new EventSource(url);
-        eventSourceRef.current = es;
-
-        es.onmessage = buildSSEHandler(
-          () => {}, // confirm 단계에서는 plan 무시
-          (analysis) => setAnalysisResult(analysis),
-          () => {} // 텍스트 청크는 analysisResult.answer로 처리
-        );
-
-        es.onerror = () => {
-          setIsCompleted(true);
-          stopStream();
-        };
-      } catch (err: any) {
-        setError(err.message || "SSE 승인 연결 실패");
-        setIsLoading(false);
-      }
-    },
-    [stopStream, buildSSEHandler, baseUrl]
+    [resetStream, stopStream, baseUrl]
   );
 
   const sendSlotFill = useCallback(
     async (slotKey: string, slotValue: string, taskName: string = "jang") => {
-      setIsLoading(true);
-      setError(null);
+      if (!sessionId) {
+        const newSid = await createSession(taskName);
+        if (!newSid) {
+          setError("세션 정보를 찾을 수 없습니다.");
+          return;
+        }
+      }
 
+      setIsLoading(true);
       try {
         const res = await fetch(`${baseUrl}/api/v1/chat/slot-fill`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             session_id: sessionId,
-            task_name: taskName,
             slot_key: slotKey,
             slot_value: slotValue,
+            task_name: taskName,
           }),
         });
-
-        if (!res.ok) throw new Error("슬롯 보완 처리 중 서버 오류");
-
         const resData = await res.json();
-        const resultData = resData.result || resData;
+        if (resData.status === "success" && resData.result) {
+          const result = resData.result;
+          setData(result.answer || "");
+          setBlocks(result.blocks || []);
+          if (result.node_logs) setNodeLogs(result.node_logs);
+          if (result.tasks) setTasks(result.tasks);
+          if (result.intent) setIntent(result.intent);
+          setStatus(result.status || "SUCCESS");
+          setIsCompleted(true);
 
-        setAnalysisResult({
-          status: "SUCCESS",
-          answer: resultData.answer || "",
-          blocks: resultData.blocks || [],
-          consultationSummary: resultData.consultation_summary || "",
-          taskPlan: resultData.task_plan || [],
-          taskClassification: resultData.task_classification || [],
-          referencedPages: resultData.referenced_pages || [],
-        });
-      } catch (e: any) {
-        setError(e.message || "Slot-fill API 호출 에러");
+          saveToSessionStorage({
+            sessionId,
+            status: result.status || "SUCCESS",
+            answer: result.answer || "",
+            blocks: result.blocks || [],
+            nodeLogs: result.node_logs || [],
+            tasks: result.tasks || [],
+            intent: result.intent || [],
+          });
+        }
+      } catch (err: any) {
+        setError(err.message || "슬롯 보완 전송에 실패했습니다.");
       } finally {
         setIsLoading(false);
-        setIsCompleted(true);
       }
     },
     [sessionId, baseUrl]
   );
 
+  const approveTaskPlan = useCallback(
+    async (approvedTasks?: string[], taskName: string = "jang") => {
+      if (!sessionId) {
+        setError("세션 정보를 찾을 수 없습니다.");
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const res = await fetch(`${baseUrl}/api/v1/chat/approve-task-plan`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            approved_tasks: approvedTasks || tasks,
+            task_name: taskName,
+          }),
+        });
+        const resData = await res.json();
+        if (resData.status === "success" && resData.result) {
+          const result = resData.result;
+          setData(result.answer || "");
+          setBlocks(result.blocks || []);
+          if (result.node_logs) setNodeLogs(result.node_logs);
+          if (result.tasks) setTasks(result.tasks);
+          if (result.intent) setIntent(result.intent);
+          setStatus(result.status || "SUCCESS");
+          setIsCompleted(true);
+
+          saveToSessionStorage({
+            sessionId,
+            status: result.status || "SUCCESS",
+            answer: result.answer || "",
+            blocks: result.blocks || [],
+            nodeLogs: result.node_logs || [],
+            tasks: result.tasks || [],
+            intent: result.intent || "",
+          });
+        }
+      } catch (err: any) {
+        setError(err.message || "작업 승인 처리 실패");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [sessionId, tasks, baseUrl]
+  );
+
   return {
-    planResult,
-    analysisResult,
+    data,
+    blocks,
+    status,
     isLoading,
     isCompleted,
     progress,
     currentStepLabel,
     stepLogs,
+    nodeLogs,
+    tasks,
+    intent,
+    llmCalls,
+    loopCount,
     error,
     sessionId,
     startStream,
-    confirmStream,
     sendSlotFill,
+    approveTaskPlan,
     stopStream,
     resetStream,
   };
