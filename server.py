@@ -347,4 +347,10 @@ async def rag_stream(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    # 주의: reload=True로 켜면 uvicorn이 실제 서버를 별도 자식 프로세스로 재실행하는데,
+    # 그 자식 프로세스에서는 rag_common.py의 UTF-8 강제 설정이 적용되지 않고 콘솔이
+    # cp949로 되돌아가서, 노드 진행 로그의 이모지 print() 때문에 요청마다 즉시 죽는다
+    # (SSE가 빈 에러만 보내고 [DONE] 없이 끊김 → 프론트는 이걸 '완료'로 오인해 빈 답변
+    # 채로 100%를 표시). 코드 변경 후에는 서버를 수동으로 재시작해야 한다.
+    reload_enabled = os.getenv("UVICORN_RELOAD", "false").lower() == "true"
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=reload_enabled)

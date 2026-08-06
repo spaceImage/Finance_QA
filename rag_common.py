@@ -5,12 +5,25 @@
 - Supabase(pgvector) 벡터스토어 연결 및 인물별 데이터 삭제
 """
 import os
+import sys
 import json
 from typing import List, Optional
 from dotenv import load_dotenv
 from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_openai import OpenAIEmbeddings
 from supabase.client import Client, create_client
+
+# Windows 콘솔은 기본 코드페이지가 cp949라서, 노드 진행 로그의 이모지(🛡️ 등)를
+# print()하는 순간 UnicodeEncodeError로 죽어버린다. 이때 FastAPI SSE 스트림은
+# [DONE] 없이 조용히 끊기고, 프론트엔드는 접속 종료를 "완료"로 오인해 빈 답변인
+# 채로 100% 완료 표시를 띄운다. 거의 모든 backend 진입점이 이 파일을 import하므로
+# 여기 한 곳에서 표준출력/표준에러를 UTF-8로 강제해 전체를 커버한다.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 load_dotenv()
 

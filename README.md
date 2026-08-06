@@ -199,8 +199,15 @@ python main.py
 ```bash
 python server.py
 # 또는
-uvicorn server:app --reload --host 0.0.0.0 --port 8000
+uvicorn server:app --host 0.0.0.0 --port 8000
 ```
+
+> ⚠️ `--reload`(자동 재시작)는 켜지 마세요. Windows에서 uvicorn이 재시작용 자식 프로세스를 띄우는 순간
+> `rag_common.py`의 UTF-8 콘솔 강제 설정이 자식 프로세스에는 적용되지 않아, 노드 로그의 이모지
+> `print()`에서 매 요청마다 `UnicodeEncodeError`로 조용히 죽습니다(SSE가 빈 답변인 채로 `[DONE]` 없이
+> 끊기고, 프론트엔드는 이걸 "완료"로 오인해 빈 답변 채로 100%를 표시합니다). 코드를 수정했다면 서버를
+> 수동으로 재시작하세요. 정말 필요하면 `UVICORN_RELOAD=true python server.py`로 켤 수는 있지만
+> Windows에서는 위 문제가 재현되니 권장하지 않습니다.
 
 주요 엔드포인트:
 
