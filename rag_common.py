@@ -7,6 +7,7 @@
 import os
 import sys
 import json
+import datetime
 from typing import List, Optional
 from dotenv import load_dotenv
 from langchain_community.vectorstores import SupabaseVectorStore
@@ -165,7 +166,7 @@ def save_audit_log(
             "input_payload": input_payload or {},
             "output_payload": output_payload or {},
             "execution_time_ms": execution_time_ms,
-            "timestamp": os.getenv("CURRENT_TIME", None) or os.popen("date -u +'%Y-%m-%dT%H:%M:%SZ'").read().strip()
+            "timestamp": os.getenv("CURRENT_TIME") or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         }
         log_file = "workflow_audit_logs.json"
         logs = []

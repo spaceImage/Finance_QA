@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 
 # main 브랜치 최신 Agentic RAG 파이프라인 연동 및 세션 헬퍼
 from test_rag_graph import run_agentic_rag_json
-from rag_common import create_session, get_session_state, update_session_state, load_policy_md, save_audit_log
+from rag_common import create_session, get_session_state, update_session_state, load_policy_md, save_audit_log, get_session_audit_logs
 
 app = FastAPI(title="Finance QA Agentic RAG SSE Server")
 
@@ -95,6 +95,19 @@ def api_get_session(session_id: str):
     return {
         "status": "success",
         "session": session_info
+    }
+
+@app.get("/api/v1/session/{session_id}/logs")
+def api_get_session_logs(session_id: str):
+    """세션의 오케스트레이션 단계별 감사 로그(audit_logs) 이력을 조회합니다.
+    (/debug 관제 대시보드의 '감사 로그 동기화' 버튼이 사용) DB에 없으면
+    workflow_audit_logs.json 파일 로그로 자동 폴백하며, 세션이 아직 없거나
+    빈 경우에도 오류 대신 빈 목록을 반환합니다."""
+    logs = get_session_audit_logs(session_id)
+    return {
+        "status": "success",
+        "session_id": session_id,
+        "logs": logs
     }
 
 @app.post("/api/v1/chat/slot-fill")
