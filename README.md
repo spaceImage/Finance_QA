@@ -68,11 +68,16 @@ source .venv/bin/activate
 # 활성화 - Windows (cmd.exe)
 .venv\Scripts\activate.bat
 
+# 활성화 - Windows (Git Bash / MINGW64) - 반드시 슬래시(/)로, 백슬래시(\)는 명령어로 인식되지 않습니다
+source .venv/Scripts/activate
+
 # 필요한 패키지 설치
 pip install -r backend/requirements.txt
 ```
 
 > PowerShell에서 `Activate.ps1` 실행이 "이 시스템에서 스크립트를 실행할 수 없습니다"로 막히면, 실행 정책이 기본값(Restricted)이기 때문입니다. 관리자 권한 없이 현재 사용자 범위에서만 풀려면: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+>
+> `.venv`가 이미 만들어져 있다면 `python -m venv .venv`를 다시 실행할 필요는 없습니다 — 특히 그 venv를 **activate한 상태에서** 재실행하면 지금 쓰고 있는 `python.exe`를 자기 자신이 덮어쓰려다 Windows 파일 잠금에 걸려 `Unable to copy ...python.exe` 에러가 납니다. 정말 새로 만들어야 한다면 먼저 `deactivate`로 빠져나온 뒤 실행하세요.
 
 ### 2. 환경변수 설정 (`.env`)
 
