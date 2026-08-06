@@ -18,11 +18,12 @@ from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 
 from langgraph.graph import StateGraph, START, END
 
-from rag_common import get_embeddings, get_vectorstore, load_policy_md as _load_policy_md, get_enrolled_sections
+from rag_common import get_embeddings, get_vectorstore, load_policy_md as _load_policy_md, get_enrolled_sections, TASKS_DIR
 from prompts import ROUTER_SYSTEM_PROMPT, MULTIHOP_CHECK_PROMPT, GENERATE_BLOCK_SYSTEM_PROMPT
 
 # .env 파일 로드
 load_dotenv()
+# (Windows cp949 콘솔 UnicodeEncodeError 방지용 UTF-8 강제는 rag_common import 시점에 처리됨)
 
 # ==========================================
 # 1. State 정의
@@ -44,7 +45,7 @@ class AgentState(TypedDict):
 class InsuranceRAGEngine:
     def __init__(self, task_name: str = "jang", openai_api_key: Optional[str] = None):
         self.task_name = task_name
-        self.csv_path = f"tasks/{task_name}/inputs/toc_config.csv"
+        self.csv_path = str(TASKS_DIR / task_name / "inputs" / "toc_config.csv")
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         self.app = self._build_graph()
 
@@ -84,10 +85,10 @@ class InsuranceRAGEngine:
         question = state["question"]
         all_sections = self.get_all_sections()
         policy_md = self.load_policy_md()
-        
+
         llm = ChatOpenAI(
-            model="gpt-5-mini", 
-            temperature=0, 
+            model="gpt-4o-mini",
+            temperature=0,
             openai_api_key=self.openai_api_key,
             model_kwargs={"response_format": {"type": "json_object"}}
         )
@@ -225,12 +226,12 @@ class InsuranceRAGEngine:
             return {"documents": []}
             
         llm = ChatOpenAI(
-            model="gpt-5-mini", 
-            temperature=0, 
+            model="gpt-4o-mini",
+            temperature=0,
             openai_api_key=self.openai_api_key,
             model_kwargs={"response_format": {"type": "json_object"}}
         )
-        
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", """당신은 검색된 문서가 사용자의 질문과 연관성이 있는지 평가하는 평가원입니다.
 문서 내용이 사용자의 질문에 답하는 데 있어 직접적인 답이 아니더라도, 지급 비율(%), 한도(일수), 가입 조건, 관련 용어의 정의 등
@@ -275,7 +276,7 @@ class InsuranceRAGEngine:
         question = state["question"]
         loop_count = state["loop_count"]
         
-        llm = ChatOpenAI(model="gpt-5-mini", temperature=0, openai_api_key=self.openai_api_key)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=self.openai_api_key)
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", """당신은 RAG 검색 확률을 높이기 위해 사용자의 질문을 검색에 최적화된 형태로 재작성하는 전문가입니다.
@@ -301,10 +302,10 @@ class InsuranceRAGEngine:
         question = state["question"]
         documents = state["documents"]
         policy_md = self.load_policy_md()
-        
+
         llm = ChatOpenAI(
-            model="gpt-5-mini", 
-            temperature=0, 
+            model="gpt-4o",
+            temperature=0,
             openai_api_key=self.openai_api_key,
             model_kwargs={"response_format": {"type": "json_object"}}
         )

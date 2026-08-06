@@ -4,10 +4,14 @@ import os
 import csv
 import json
 import re
+from pathlib import Path
 import fitz  # PyMuPDF
 
 # 물리적 PDF 페이지 = 약관 인쇄(로직) 페이지 + PAGE_OFFSET (표지/목차/가이드 페이지 오프셋)
 PAGE_OFFSET = 12
+
+# backend/pipeline/step_1.py -> 레포 루트 (tasks/ 는 backend/ 밖에 있음)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 def sanitize_filename(filename: str) -> str:
     """파일명 특수문자 제거"""
@@ -81,7 +85,7 @@ def extract_two_column_text(page, width_threshold_ratio=0.5) -> str:
     return "\n\n".join(t for _, _, t in ordered)
 
 def run_step_1(task_folder_name: str):
-    task_dir = os.path.join("tasks", task_folder_name)
+    task_dir = os.path.join(PROJECT_ROOT, "tasks", task_folder_name)
     input_dir = os.path.join(task_dir, "inputs")
     output_dir = os.path.join(task_dir, "parsed_json_parts")
     

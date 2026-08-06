@@ -81,11 +81,11 @@ def api_get_policy(task_name: str = "jang"):
 def api_get_policy_pdf(task_name: str = "jang"):
     """고객의 보험약관 PDF 파일을 반환합니다."""
     import glob
-    pattern = f"pdf_policy/{task_name[0].upper() if task_name else ''}*보험약관*.pdf"
+    from rag_common import PDF_POLICY_DIR
     # task_name 이니셜로 파일 검색 (jang -> 장)
     name_map = {"jang": "장석찬"}
     person_name = name_map.get(task_name, task_name)
-    matches = glob.glob(f"pdf_policy/{person_name}*.pdf")
+    matches = glob.glob(str(PDF_POLICY_DIR / f"{person_name}*.pdf"))
     if not matches:
         raise HTTPException(status_code=404, detail=f"약관 PDF를 찾을 수 없습니다: {task_name}")
     from urllib.parse import quote

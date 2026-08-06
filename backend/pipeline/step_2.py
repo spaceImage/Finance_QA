@@ -2,9 +2,13 @@
 # 사람 한 명 기준 final_output/{task_name}_final.json 하나로 합칩니다.
 import os
 import json
+from pathlib import Path
+
+# backend/pipeline/step_2.py -> 레포 루트 (tasks/ 는 backend/ 밖에 있음)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 def run_step_2(task_folder_name: str):
-    task_dir = os.path.join("tasks", task_folder_name)
+    task_dir = os.path.join(PROJECT_ROOT, "tasks", task_folder_name)
     parts_dir = os.path.join(task_dir, "parsed_json_parts")
     final_dir = os.path.join(task_dir, "final_output")
 

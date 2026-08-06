@@ -5,7 +5,9 @@
 - Supabase(pgvector) 벡터스토어 연결 및 인물별 데이터 삭제
 """
 import os
+import sys
 import json
+from pathlib import Path
 from typing import List, Optional
 from dotenv import load_dotenv
 from langchain_community.vectorstores import SupabaseVectorStore
@@ -14,13 +16,30 @@ from supabase.client import Client, create_client
 
 load_dotenv()
 
+# ⭐ Windows에서 콘솔/로그 인코딩이 cp949로 잡히면 이 프로젝트 곳곳의 print()에 있는
+# 이모지(🔮, ⚖️, 📄 등)에서 UnicodeEncodeError가 나서 실행 중이던 스크립트가 조용히 죽습니다
+# (server.py의 SSE 스트림이면 [DONE] 없이 끊겨 프론트가 "분석 중..."에 멈춘 것처럼 보임).
+# rag_common은 backend/ 안 거의 모든 진입점(main.py, server.py, test_rag_graph.py, pipeline/step_3.py 등)이
+# 공통으로 import하므로, 여기 한 곳에서 고쳐두면 PYTHONUTF8 환경변수 설정 여부와 무관하게 항상 안전합니다.
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 DOCUMENTS_TABLE = "documents"
 MATCH_FUNCTION = "match_documents"
+
+# ⭐ tasks/, pdf_policy/ 등 데이터 폴더는 backend/ 밖(레포 루트)에 있습니다.
+# "tasks/..." 같은 cwd 상대경로는 실행 위치(uvicorn을 어디서 띄웠는지 등)에 따라 깨지므로,
+# 이 파일(__file__) 기준 절대경로로 고정해 어디서 실행해도 항상 같은 폴더를 가리키게 합니다.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+TASKS_DIR = PROJECT_ROOT / "tasks"
+PDF_POLICY_DIR = PROJECT_ROOT / "pdf_policy"
+PDF_CERTIFICATE_DIR = PROJECT_ROOT / "pdf_certificate"
 
 
 def get_certificate_path(task_name: str) -> str:
     """인물별 보험증권 요약 마크다운 파일 경로. tasks/{task_name}/certificate.md"""
-    return os.path.join("tasks", task_name, "certificate.md")
+    return str(TASKS_DIR / task_name / "certificate.md")
 
 
 def load_policy_md(task_name: str) -> str:
@@ -35,7 +54,7 @@ def load_policy_md(task_name: str) -> str:
 
 def get_enrolled_sections_path(task_name: str) -> str:
     """인물별 실제 가입 특약 allowlist 경로. tasks/{task_name}/enrolled_sections.json"""
-    return os.path.join("tasks", task_name, "enrolled_sections.json")
+    return str(TASKS_DIR / task_name / "enrolled_sections.json")
 
 
 def get_enrolled_sections(task_name: str) -> Optional[List[str]]:

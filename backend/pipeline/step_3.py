@@ -5,14 +5,14 @@ import os
 import json
 from dotenv import load_dotenv
 from langchain_core.documents import Document
-from rag_common import get_embeddings, get_supabase_client, clear_task_documents, DOCUMENTS_TABLE, MATCH_FUNCTION
+from rag_common import get_embeddings, get_supabase_client, clear_task_documents, DOCUMENTS_TABLE, MATCH_FUNCTION, TASKS_DIR
 from langchain_community.vectorstores import SupabaseVectorStore
 
 # .env 로드
 load_dotenv()
 
 def run_step_3(task_folder_name: str, overlap_chars: int = 400):
-    task_dir = os.path.join("tasks", task_folder_name)
+    task_dir = os.path.join(TASKS_DIR, task_folder_name)
     final_json_path = os.path.join(task_dir, "final_output", f"{task_folder_name}_final.json")
 
     # API 키 검증

@@ -21,19 +21,24 @@ PDF 형식의 보험약관 문서를 목차(TOC) 기준으로 파싱하여 JSON 
 
 ```text
 Finance_QA/
-├── main.py              # [준비 단계 진입점] 파이프라인 전체 실행 메인 CLI 스크립트 (step_1~3 실행)
-├── step_1.py            # 1단계: PDF 파싱 & 목차별 1차 JSON 생성
-├── step_2.py            # 2단계: 1차 JSON 파일들을 최종 단일 JSON으로 병합
-├── step_3.py            # 3단계: 최종 JSON 기반 Supabase(pgvector) Vector DB 적재
-├── rag_common.py         # 공용 헬퍼: 인물별 certificate.md 로드, Supabase 벡터스토어 연결
-├── rebuild_db.py         # 개발용 단축 스크립트: jang 한 명만 step_1~3 한 번에 재실행
-├── test_rag_graph.py     # [질문 단계 진입점] LangGraph 기반 Agentic RAG 엔진 (유일한 질의응답 파일)
-├── benchmark.py          # 검증 질문 세트 + LLM grounding 재검증으로 PASS/FAIL 리포트 생성
-├── db/schema.sql          # Supabase에 한 번 실행: pgvector 확장, documents 테이블, match_documents 함수
-├── requirements.txt       # 프로젝트 의존성 라이브러리 목록
+├── backend/
+│   ├── main.py              # [준비 단계 진입점] 파이프라인 전체 실행 메인 CLI 스크립트 (pipeline/step_1~3 실행)
+│   ├── pipeline/             # 온보딩 전용: 새 고객 약관이 들어올 때만 쓰는 데이터 준비 파이프라인
+│   │   ├── step_1.py            # 1단계: PDF 파싱 & 목차별 1차 JSON 생성
+│   │   ├── step_2.py            # 2단계: 1차 JSON 파일들을 최종 단일 JSON으로 병합
+│   │   └── step_3.py            # 3단계: 최종 JSON 기반 Supabase(pgvector) Vector DB 적재
+│   ├── rag_common.py         # 공용 헬퍼: 인물별 certificate.md 로드, Supabase 벡터스토어 연결
+│   ├── rebuild_db.py         # 개발용 단축 스크립트: jang 한 명만 step_1~3 한 번에 재실행
+│   ├── test_rag_graph.py     # [질문 단계 진입점] LangGraph 기반 Agentic RAG 엔진 (유일한 질의응답 파일)
+│   ├── server.py             # FastAPI SSE 서버 (프론트엔드가 붙는 API)
+│   ├── prompts.py            # 라우팅용 시스템 프롬프트
+│   ├── benchmark.py          # 검증 질문 세트 + LLM grounding 재검증으로 PASS/FAIL 리포트 생성
+│   └── requirements.txt      # 프로젝트(백엔드) 의존성 라이브러리 목록
+├── frontend/               # Next.js 상담사 인바운드 UI (SSE로 backend/server.py에 연결)
+├── db/schema.sql          # Supabase에 한 번 실행: pgvector 확장, documents/sessions/audit_logs 테이블
 ├── modify.md              # 변경 이력 + 시스템 아키텍처 다이어그램 (자세한 문서)
 ├── .gitignore             # Git 추적 제외 설정 파일 (.env 포함)
-└── tasks/                 # 작업(Task) 데이터 저장 디렉토리
+└── tasks/                 # 작업(Task) 데이터 저장 디렉토리 (backend/ 밖, 코드와 분리된 데이터)
     └── {task_name}/
         ├── inputs/             # PDF 약관 파일(raw_policy.pdf) 및 목차 설정(toc_config.csv)
         ├── parsed_json_parts/  # 목차별 분할 파싱 1차 JSON 파일들
@@ -42,6 +47,7 @@ Finance_QA/
 ```
 
 > 벡터 데이터는 더 이상 로컬 폴더(`tasks/{name}/vector_db/`)에 저장하지 않습니다 — Supabase 클라우드 DB 하나로 통합되어 있습니다.
+> `tasks/`, `pdf_policy/`, `pdf_certificate/`, `db/`는 코드가 아니라 데이터라서 `backend/` 밖(레포 루트)에 그대로 둡니다. `backend/` 안의 코드는 어디서 실행하든(`backend/`든 레포 루트든) `backend/rag_common.py`의 `TASKS_DIR` 등 절대경로 상수로 이 폴더들을 찾습니다.
 
 ---
 
@@ -56,7 +62,7 @@ source .venv/bin/activate  # macOS / Linux
 # .venv\Scripts\activate   # Windows
 
 # 필요한 패키지 설치
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 ```
 
 ### 2. 환경변수 설정 (`.env`)
@@ -83,9 +89,10 @@ Supabase 대시보드 SQL Editor에서 [db/schema.sql](db/schema.sql) 내용을 
 
 ## 🚀 사용 방법 (데이터 준비 단계)
 
-### 1. 메인 파이프라인 실행 (`main.py`)
+### 1. 메인 파이프라인 실행 (`backend/main.py`)
 
 ```bash
+cd backend
 python main.py
 ```
 
@@ -96,9 +103,9 @@ python main.py
  📄 보험약관 구조화 & Vector DB 구축 파이프라인
 ==========================================
  1. [1단계] 새 작업 폴더 생성
- 2. [2단계] PDF 파싱 & 목차별 1차 JSON 생성 (step_1.py)
- 3. [3단계] 1차 JSON 검토 후 최종 단일 JSON 병합 (step_2.py)
- 4. [4단계] 최종 JSON 기반 Vector DB 생성 (step_3.py)
+ 2. [2단계] PDF 파싱 & 목차별 1차 JSON 생성 (pipeline/step_1.py)
+ 3. [3단계] 1차 JSON 검토 후 최종 단일 JSON 병합 (pipeline/step_2.py)
+ 4. [4단계] 최종 JSON 기반 Vector DB 생성 (pipeline/step_3.py)
  0. 종료
 ==========================================
 ```
@@ -108,12 +115,31 @@ python main.py
 2. **입력 파일 준비**: `tasks/{task_name}/inputs/` 경로에 아래 두 파일 입력
    - `raw_policy.pdf`: 원본 보험약관 PDF 파일
    - `toc_config.csv`: 약관 목차 정보가 수록된 CSV 파일
-3. **[2단계] PDF 파싱 (step_1.py)**: PDF 문서와 TOC 설정을 매핑하여 섹션별 JSON 조각을 생성합니다.
-4. **[3단계] 단일 JSON 병합 (step_2.py)**: 분할 파싱된 JSON 조각들을 하나의 최종 JSON 파일로 결합합니다.
-5. **[4단계] Vector DB 구축 (step_3.py)**: 최종 JSON 데이터를 읽어 임베딩을 생성하고 **Supabase(pgvector)** 에 저장합니다. 재실행해도 그 인물의 기존 벡터를 지우고 새로 넣으므로 중복 적재되지 않습니다.
+3. **[2단계] PDF 파싱 (pipeline/step_1.py)**: PDF 문서와 TOC 설정을 매핑하여 섹션별 JSON 조각을 생성합니다.
+4. **[3단계] 단일 JSON 병합 (pipeline/step_2.py)**: 분할 파싱된 JSON 조각들을 하나의 최종 JSON 파일로 결합합니다.
+5. **[4단계] Vector DB 구축 (pipeline/step_3.py)**: 최종 JSON 데이터를 읽어 임베딩을 생성하고 **Supabase(pgvector)** 에 저장합니다. 재실행해도 그 인물의 기존 벡터를 지우고 새로 넣으므로 중복 적재되지 않습니다.
 6. **(선택) 개인 보험증권 요약 추가**: `tasks/{task_name}/certificate.md`에 그 사람 증권의 가입금액·보장금액 표를 markdown으로 정리해두면, 질문 답변 시 실제 원화 금액 계산에 사용됩니다.
 
-`jang` 한 명만 빠르게 전체 재실행하고 싶다면 `python rebuild_db.py`로도 가능합니다.
+`jang` 한 명만 빠르게 전체 재실행하고 싶다면 (backend/ 에서) `python rebuild_db.py`로도 가능합니다.
+
+> `pipeline/`(step_1~3)은 **기존 고객 데이터가 다 처리됐다고 필요 없어지는 게 아니라, 새 고객이 추가될 때마다 계속 쓰는 온보딩 도구**입니다. 지금 서빙 중인 질의응답(`test_rag_graph.py`, `server.py`)과는 완전히 분리된 별도 관심사라 `backend/pipeline/` 하위로 나눠뒀습니다.
+
+### 2. 질의응답 API 서버 + 프론트엔드 실행
+
+데이터 준비가 끝났으면, 상담사용 웹 UI로 질문할 수 있습니다.
+
+```bash
+# 1) 백엔드 (FastAPI SSE 서버, :8000)
+cd backend
+uvicorn server:app --reload
+
+# 2) 프론트엔드 (Next.js, :3000) — 별도 터미널에서
+cd frontend
+npm install   # 최초 1회
+npm run dev
+```
+
+브라우저에서 http://localhost:3000 을 열면 됩니다.
 
 ---
 
@@ -121,9 +147,11 @@ python main.py
 
 ### 1. 직접 질문해보기 (터미널)
 
-Vector DB 구축이 끝났다면 `test_rag_graph.py`를 바로 실행해서 질문할 수 있습니다. 답변은 실시간 스트리밍으로 출력됩니다.
+Vector DB 구축이 끝났다면 `backend/test_rag_graph.py`를 바로 실행해서 질문할 수 있습니다. 답변은 실시간 스트리밍으로 출력됩니다.
 
 ```bash
+cd backend
+
 # 계속 질문을 입력받는 대화형 모드 (종료: exit / q)
 python test_rag_graph.py
 
@@ -153,6 +181,7 @@ result_json = run_agentic_rag_json("갑상선암 진단 시 보장 금액은?")
 정답을 미리 알고 있는 검증 질문 10개를 실행하고, 답변이 실제 근거 문서·증권과 부합하는지(hallucination 없는지) 별도 LLM으로 재검증한 뒤 PASS/FAIL 리포트를 만듭니다.
 
 ```bash
+cd backend
 python benchmark.py
 ```
 

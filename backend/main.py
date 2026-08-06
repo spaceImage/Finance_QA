@@ -1,12 +1,13 @@
 # [메인 실행 파일] 터미널 메뉴로 사람(task) 등록 -> PDF 파싱 -> JSON 병합 -> 벡터DB 적재까지
-# step_1/2/3.py를 순서대로 실행해주는 대화형 CLI. 실제로 실행하는 진입점은 이 파일입니다.
+# pipeline/step_1~3.py를 순서대로 실행해주는 대화형 CLI. 실제로 실행하는 진입점은 이 파일입니다.
 import os
 import sys
-from step_1 import run_step_1
-from step_2 import run_step_2
-from step_3 import run_step_3
+from pipeline.step_1 import run_step_1
+from pipeline.step_2 import run_step_2
+from pipeline.step_3 import run_step_3
+from rag_common import TASKS_DIR
 
-BASE_TASKS_DIR = "tasks"
+BASE_TASKS_DIR = str(TASKS_DIR)
 
 def create_new_task():
     print("\n--- [1단계] 새 작업 폴더 생성 ---")
@@ -59,9 +60,9 @@ def main():
         print(" 📄 보험약관 구조화 & Vector DB 구축 파이프라인")
         print("==========================================")
         print(" 1. [1단계] 새 작업 폴더 생성")
-        print(" 2. [2단계] PDF 파싱 & 목차별 1차 JSON 생성 (step_1.py)")
-        print(" 3. [3단계] 1차 JSON 검토 후 최종 단일 JSON 병합 (step_2.py)")
-        print(" 4. [4단계] 최종 JSON 기반 Vector DB 생성 (step_3.py)")
+        print(" 2. [2단계] PDF 파싱 & 목차별 1차 JSON 생성 (pipeline/step_1.py)")
+        print(" 3. [3단계] 1차 JSON 검토 후 최종 단일 JSON 병합 (pipeline/step_2.py)")
+        print(" 4. [4단계] 최종 JSON 기반 Vector DB 생성 (pipeline/step_3.py)")
         print(" 0. 종료")
         print("==========================================")
         
