@@ -241,6 +241,17 @@ export default function Home() {
   const [showJsonRaw, setShowJsonRaw] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  // 사용자가 스크롤을 위로 올려 과거 대화를 읽고 있을 땐 자동 스크롤을 멈춘다.
+  // 바닥 근처(80px 이내)에 있을 때만 "따라 내려가기"를 유지.
+  const shouldAutoScrollRef = useRef(true);
+
+  const handleChatScroll = () => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    shouldAutoScrollRef.current = distanceFromBottom < 80;
+  };
 
   const {
     data,
@@ -332,9 +343,11 @@ export default function Home() {
     };
   }, [isLoading]);
 
-  // 자동 스크롤
+  // 자동 스크롤 — 사용자가 위로 스크롤해 과거 대화를 읽는 중이면 끌어내리지 않는다.
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (shouldAutoScrollRef.current) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages, data, blocks]);
 
   // 실시간 스트리밍 업데이트를 messages 마지막 AI 메세지에 반영
@@ -376,6 +389,7 @@ export default function Home() {
 
     startTimeRef.current = Date.now();
     setLiveElapsedSec(0);
+    shouldAutoScrollRef.current = true;
 
     const userMsg: ChatMessage = {
       id: `usr-${Date.now()}`,
@@ -402,6 +416,7 @@ export default function Home() {
     if (isLoading) return;
     startTimeRef.current = Date.now();
     setLiveElapsedSec(0);
+    shouldAutoScrollRef.current = true;
 
     const userMsg: ChatMessage = {
       id: `usr-${Date.now()}`,
@@ -539,7 +554,11 @@ export default function Home() {
         {/* Right Main Chat Container */}
         <section className="md:col-span-3 bg-white border border-slate-200/90 rounded-2xl shadow-sm flex flex-col h-[75vh] md:h-[82vh] overflow-hidden">
           {/* Chat Messages Log */}
-          <div className="flex-1 p-4 md:p-6 overflow-y-auto space-y-6">
+          <div
+            ref={chatContainerRef}
+            onScroll={handleChatScroll}
+            className="flex-1 p-4 md:p-6 overflow-y-auto space-y-6"
+          >
             {messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center space-y-3 text-slate-400">
                 <div className="w-14 h-14 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-2xl">
